@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Vocabulary Assistant</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-graduation-cap"></i>
+                    <h1>VocabAI</h1>
+                </div>
+                <div class="header-stats">
+                    <div class="stat-badge">
+                        <i class="fas fa-fire"></i>
+                        <span id="streak-count">0</span> days
+                    </div>
+                    <div class="stat-badge">
+                        <i class="fas fa-book"></i>
+                        <span id="word-count">0</span> words
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav">
+            <button class="nav-btn active" data-tab="learn">
+                <i class="fas fa-book-open"></i>
+                <span>Learn</span>
+            </button>
+            <button class="nav-btn" data-tab="review">
+                <i class="fas fa-sync-alt"></i>
+                <span>Review</span>
+                <span class="badge" id="review-badge">0</span>
+            </button>
+            <button class="nav-btn" data-tab="quiz">
+                <i class="fas fa-question-circle"></i>
+                <span>Quiz</span>
+            </button>
+            <button class="nav-btn" data-tab="stats">
+                <i class="fas fa-chart-line"></i>
+                <span>Stats</span>
+            </button>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Add Word Section (always visible) -->
+            <section class="add-word-section">
+                <div class="search-box">
+                    <input type="text" id="word-input" placeholder="Enter a word to learn..." autocomplete="off">
+                    <button id="add-btn" class="btn-primary">
+                        <i class="fas fa-plus"></i>
+                        <span>Add Word</span>
+                    </button>
+                </div>
+                <div class="search-options">
+                    <label class="toggle">
+                        <input type="checkbox" id="real-examples" checked>
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">Search real news examples</span>
+                    </label>
+                </div>
+            </section>
+
+            <!-- Loading State -->
+            <div id="loading" class="loading hidden">
+                <div class="spinner"></div>
+                <p>Searching real news sources...</p>
+                <p class="loading-sub">Reuters, BBC, The Guardian, NPR...</p>
+            </div>
+
+            <!-- Learn Tab -->
+            <div class="tab-content active" id="tab-learn">
+                <div class="section-header">
+                    <h2><i class="fas fa-book"></i> My Vocabulary</h2>
+                    <div class="filters">
+                        <button class="filter-btn active" data-filter="all">All</button>
+                        <button class="filter-btn" data-filter="due">Due</button>
+                        <button class="filter-btn" data-filter="learned">Learned</button>
+                    </div>
+                </div>
+                <div class="words-grid" id="words-grid">
+                    <!-- Word cards injected here -->
+                </div>
+                <div class="empty-state hidden" id="empty-words">
+                    <i class="fas fa-inbox"></i>
+                    <p>No words yet. Add your first word above!</p>
+                </div>
+            </div>
+
+            <!-- Review Tab -->
+            <div class="tab-content" id="tab-review">
+                <div class="section-header">
+                    <h2><i class="fas fa-sync-alt"></i> Daily Review</h2>
+                    <button class="btn-secondary" id="start-review-btn">
+                        <i class="fas fa-play"></i> Start Review
+                    </button>
+                </div>
+                <div class="review-container" id="review-container">
+                    <div class="review-card hidden" id="review-card">
+                        <div class="review-word">
+                            <h3 id="review-word-text"></h3>
+                            <span class="phonetic" id="review-phonetic"></span>
+                        </div>
+                        <div class="review-meaning hidden" id="review-meaning">
+                            <p id="review-chinese"></p>
+                            <p class="example" id="review-example"></p>
+                            <p class="translation" id="review-translation"></p>
+                        </div>
+                        <div class="review-actions">
+                            <button class="btn-reveal" id="reveal-btn">Show Answer</button>
+                            <div class="quality-buttons hidden" id="quality-buttons">
+                                <p>How well did you remember?</p>
+                                <div class="quality-row">
+                                    <button class="quality-btn q0" data-quality="0">Again</button>
+                                    <button class="quality-btn q1" data-quality="1">Hard</button>
+                                    <button class="quality-btn q2" data-quality="2">Good</button>
+                                    <button class="quality-btn q3" data-quality="3">Easy</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="empty-state" id="empty-review">
+                        <i class="fas fa-check-circle"></i>
+                        <p>No words due for review. Great job!</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quiz Tab -->
+            <div class="tab-content" id="tab-quiz">
+                <div class="section-header">
+                    <h2><i class="fas fa-question-circle"></i> Quiz</h2>
+                    <button class="btn-secondary" id="start-quiz-btn">
+                        <i class="fas fa-play"></i> Start Quiz
+                    </button>
+                </div>
+                <div class="quiz-container" id="quiz-container">
+                    <div class="quiz-card hidden" id="quiz-card">
+                        <div class="quiz-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="quiz-progress"></div>
+                            </div>
+                            <span id="quiz-counter">1/5</span>
+                        </div>
+                        <div class="quiz-question">
+                            <p id="quiz-question-text"></p>
+                        </div>
+                        <div class="quiz-options" id="quiz-options">
+                            <!-- Options injected here -->
+                        </div>
+                        <div class="quiz-feedback hidden" id="quiz-feedback">
+                            <div class="feedback-icon" id="feedback-icon"></div>
+                            <p id="feedback-text"></p>
+                            <button class="btn-primary" id="next-quiz-btn">Next</button>
+                        </div>
+                    </div>
+                    <div class="quiz-results hidden" id="quiz-results">
+                        <div class="results-icon">🎯</div>
+                        <h3>Quiz Complete!</h3>
+                        <div class="score-display">
+                            <span id="quiz-score">0</span>/<span id="quiz-total">0</span>
+                        </div>
+                        <p id="quiz-message"></p>
+                        <button class="btn-primary" id="retry-quiz-btn">Try Again</button>
+                    </div>
+                    <div class="empty-state" id="empty-quiz">
+                        <i class="fas fa-clipboard-list"></i>
+                        <p>No quiz available. Add more words first!</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats Tab -->
+            <div class="tab-content" id="tab-stats">
+                <div class="section-header">
+                    <h2><i class="fas fa-chart-line"></i> Statistics</h2>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon blue"><i class="fas fa-book"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-total">0</span>
+                            <span class="stat-label">Total Words</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon green"><i class="fas fa-check-circle"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-learned">0</span>
+                            <span class="stat-label">Learned</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon orange"><i class="fas fa-sync-alt"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-reviewed">0</span>
+                            <span class="stat-label">Reviews</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon purple"><i class="fas fa-fire"></i></div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="stat-streak">0</span>
+                            <span class="stat-label">Day Streak</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="stats-chart">
+                    <h3>Weekly Activity</h3>
+                    <div class="chart-container" id="weekly-chart">
+                        <!-- Chart bars injected here -->
+                    </div>
+                </div>
+                <div class="stats-mastery">
+                    <h3>Mastery Level</h3>
+                    <div class="mastery-badge" id="mastery-badge">
+                        <i class="fas fa-medal"></i>
+                        <span id="mastery-text">Novice</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Toast Notifications -->
+        <div class="toast-container" id="toast-container"></div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
