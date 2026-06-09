@@ -34,19 +34,16 @@ async def get_due_words(user_id: Optional[int] = None, db: Session = Depends(get
 
 # ========== NEW: Force Review Endpoint ==========
 @router.get("/word/{word_id}")
+@router.get("/word/{word_id}")
 async def get_word_for_review(word_id: int, db: Session = Depends(get_db)):
-    """
-    Get a specific word for review, regardless of due status.
-    Used when user clicks "Review" on a word card.
-    """
+    """Get a specific word for review, regardless of due status."""
     word = db.query(Word).filter(Word.id == word_id).first()
     if not word:
         raise HTTPException(status_code=404, detail="Word not found")
-
-    # Get or create review record
+    
+    # Ensure review record exists
     review = db.query(Review).filter(Review.word_id == word_id).first()
     if not review:
-        # Create review record if missing
         review = Review(
             word_id=word_id,
             interval=1,
@@ -57,7 +54,7 @@ async def get_word_for_review(word_id: int, db: Session = Depends(get_db)):
         )
         db.add(review)
         db.commit()
-
+    
     return {
         "success": True,
         "word_id": word.id,
@@ -66,10 +63,6 @@ async def get_word_for_review(word_id: int, db: Session = Depends(get_db)):
         "chinese_meaning": word.chinese_meaning,
         "example_sentence": word.example_sentence,
         "chinese_translation": word.chinese_translation,
-        "is_due": review.is_due,
-        "repetitions": review.repetitions,
-        "interval": review.interval,
-        "message": "Review this word now!"
     }
 
 @router.post("/submit")

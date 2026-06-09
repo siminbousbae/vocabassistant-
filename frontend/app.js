@@ -1,6 +1,6 @@
 // ========================================
 // AI Vocabulary Assistant - Frontend
-// Fixed Review Logic - Word Card Review Works Anytime
+// Fully Fixed - Matches HTML Structure
 // ========================================
 
 // State
@@ -13,21 +13,22 @@ let quizQueue = [];
 let quizIndex = 0;
 let quizScore = 0;
 let currentQuizQuestion = null;
-let currentTab = 'words';
+let currentTab = 'learn';  // ← matches HTML data-tab="learn"
 
-// DOM Elements
+// DOM Elements - MATCHING HTML IDs
 const tabs = {
-    words: document.getElementById('tab-words'),
+    learn: document.getElementById('tab-learn'),      // ← 'tab-learn'
     review: document.getElementById('tab-review'),
     quiz: document.getElementById('tab-quiz'),
     stats: document.getElementById('tab-stats')
 };
 
+// Nav buttons - select by data-tab
 const navButtons = {
-    words: document.getElementById('nav-words'),
-    review: document.getElementById('nav-review'),
-    quiz: document.getElementById('nav-quiz'),
-    stats: document.getElementById('nav-stats')
+    learn: document.querySelector('[data-tab="learn"]'),
+    review: document.querySelector('[data-tab="review"]'),
+    quiz: document.querySelector('[data-tab="quiz"]'),
+    stats: document.querySelector('[data-tab="stats"]')
 };
 
 // ========================================
@@ -52,24 +53,18 @@ function createToastContainer() {
 }
 
 function showLoading(message = 'Loading...') {
-    const existing = document.getElementById('loading-overlay');
-    if (existing) existing.remove();
-
-    const overlay = document.createElement('div');
-    overlay.id = 'loading-overlay';
-    overlay.className = 'loading-overlay';
-    overlay.innerHTML = `
-        <div class="loading">
-            <div class="spinner"></div>
-            <p>${message}</p>
-        </div>
-    `;
-    document.body.appendChild(overlay);
+    const loading = document.getElementById('loading');
+    if (loading) {
+        loading.classList.remove('hidden');
+        loading.querySelector('p').textContent = message;
+    }
 }
 
 function hideLoading() {
-    const overlay = document.getElementById('loading-overlay');
-    if (overlay) overlay.remove();
+    const loading = document.getElementById('loading');
+    if (loading) {
+        loading.classList.add('hidden');
+    }
 }
 
 // ========================================
@@ -94,40 +89,52 @@ function switchTab(tabName) {
     currentTab = tabName;
 
     // Refresh tab content
-    if (tabName === 'words') loadWords();
+    if (tabName === 'learn') loadWords();
     if (tabName === 'review') loadReviewTab();
     if (tabName === 'quiz') loadQuizTab();
     if (tabName === 'stats') loadStats();
 }
 
 // ========================================
-// WORDS TAB
+// WORDS TAB (Learn Tab)
 // ========================================
 
 async function loadWords() {
     try {
-        const response = await fetch('/api/words/list');
+        const response = await fetch('/words/list');
         if (!response.ok) throw new Error('Failed to load words');
         words = await response.json();
         renderWords();
+        updateHeaderStats();
     } catch (error) {
         showToast('Failed to load words', 'error');
         console.error(error);
     }
 }
 
-function renderWords() {
-    const container = document.getElementById('words-list');
-    if (!container) return;
+function updateHeaderStats() {
+    const wordCount = document.getElementById('word-count');
+    if (wordCount) {
+        wordCount.textContent = words.length;
+    }
+}
 
-    if (words.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <p>No words yet. Add your first word above!</p>
-            </div>
-        `;
+function renderWords() {
+    const container = document.getElementById('words-grid');
+    const emptyState = document.getElementById('empty-words');
+
+    if (!container) {
+        console.error('ERROR: words-grid container not found!');
         return;
     }
+
+    if (words.length === 0) {
+        container.innerHTML = '';
+        if (emptyState) emptyState.classList.remove('hidden');
+        return;
+    }
+
+    if (emptyState) emptyState.classList.add('hidden');
 
     container.innerHTML = words.map(word => `
         <div class="word-card ${word.learned ? 'learned' : ''} ${word.is_due ? 'due' : ''}" data-word-id="${word.id}">
@@ -161,7 +168,7 @@ function renderWords() {
 }
 
 function attachWordCardListeners() {
-    // Review button on word card - FIXED: Uses new endpoint
+    // Review button on word card
     document.querySelectorAll('.btn-review-word').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -190,7 +197,7 @@ function attachWordCardListeners() {
 }
 
 // ========================================
-// REVIEW - THE FIXED PART
+// REVIEW
 // ========================================
 
 function resetReviewState() {
@@ -200,28 +207,33 @@ function resetReviewState() {
     isReviewRevealed = false;
 }
 
-// Load review tab - shows due words list + start button
 async function loadReviewTab() {
     const container = document.getElementById('review-container');
+    const reviewCard = document.getElementById('review-card');
+    const emptyReview = document.getElementById('empty-review');
+
     if (!container) return;
 
     try {
-        const response = await fetch('/api/review/due');
+        const response = await fetch('/review/due');
         if (!response.ok) throw new Error('Failed to load due words');
         const data = await response.json();
 
         const dueWords = data.due_words || [];
 
+        // Update badge
+        const badge = document.getElementById('review-badge');
+        if (badge) badge.textContent = dueWords.length;
+
         if (dueWords.length === 0) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <p>No words due for review. Great job! 🎉</p>
-                </div>
-            `;
+            if (reviewCard) reviewCard.classList.add('hidden');
+            if (emptyReview) emptyReview.classList.remove('hidden');
             return;
         }
 
-        // Show due words list with start button
+        if (emptyReview) emptyReview.classList.add('hidden');
+
+        // Show start review button with due count
         container.innerHTML = `
             <div class="review-intro">
                 <h3>📚 ${dueWords.length} words due for review</h3>
@@ -251,7 +263,6 @@ async function loadReviewTab() {
     }
 }
 
-// Start a full review session (from Review tab)
 function startReviewSession(dueWords) {
     resetReviewState();
     reviewQueue = [...dueWords];
@@ -259,14 +270,8 @@ function startReviewSession(dueWords) {
     showNextReviewWord();
 }
 
-// ========== FIXED: Word Card Review ==========
-// Uses NEW endpoint: GET /api/review/word/{word_id}
-// This works even if the word is NOT due!
-
 async function startSingleWordReview(wordId) {
     resetReviewState();
-
-    // Switch to review tab first
     switchTab('review');
 
     const container = document.getElementById('review-container');
@@ -275,8 +280,7 @@ async function startSingleWordReview(wordId) {
     showLoading('Loading word...');
 
     try {
-        // NEW: Use the force-review endpoint
-        const response = await fetch(`/api/review/word/${wordId}`);
+        const response = await fetch(`/review/word/${wordId}`);
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || 'Failed to load word');
@@ -288,7 +292,6 @@ async function startSingleWordReview(wordId) {
             throw new Error(data.message || 'Failed to load word');
         }
 
-        // Create a single-word review queue
         reviewQueue = [{
             word_id: data.word_id,
             word: data.word,
@@ -305,13 +308,10 @@ async function startSingleWordReview(wordId) {
     } catch (error) {
         hideLoading();
         showToast(error.message, 'error');
-        console.error(error);
-
-        // Show error in review tab
         container.innerHTML = `
             <div class="empty-state">
                 <p>❌ ${error.message}</p>
-                <button class="btn-primary" onclick="switchTab('words')">Back to Words</button>
+                <button class="btn-primary" onclick="switchTab('learn')">Back to Words</button>
             </div>
         `;
     }
@@ -319,16 +319,18 @@ async function startSingleWordReview(wordId) {
 
 function showNextReviewWord() {
     const container = document.getElementById('review-container');
+    const reviewCard = document.getElementById('review-card');
+    const emptyReview = document.getElementById('empty-review');
+
     if (!container) return;
 
-    // Check if review is complete
     if (reviewIndex >= reviewQueue.length) {
         container.innerHTML = `
             <div class="review-complete">
                 <h2>🎉 Review Complete!</h2>
                 <p>You reviewed ${reviewQueue.length} words.</p>
                 <button id="btn-review-again" class="btn-primary">Review Again</button>
-                <button id="btn-back-menu" class="btn-secondary">Back to Menu</button>
+                <button id="btn-back-menu" class="btn-secondary">Back to Words</button>
             </div>
         `;
 
@@ -338,7 +340,7 @@ function showNextReviewWord() {
         });
 
         document.getElementById('btn-back-menu')?.addEventListener('click', () => {
-            switchTab('words');
+            switchTab('learn');
         });
 
         return;
@@ -347,65 +349,77 @@ function showNextReviewWord() {
     currentReviewWord = reviewQueue[reviewIndex];
     isReviewRevealed = false;
 
-    container.innerHTML = `
-        <div class="review-progress">
-            <span>Word ${reviewIndex + 1} of ${reviewQueue.length}</span>
-            <div class="progress-bar">
-                <div class="progress-fill" style="width: ${(reviewIndex / reviewQueue.length) * 100}%"></div>
-            </div>
-        </div>
-        <div class="review-card">
-            <div class="review-word">
-                <h3>${currentReviewWord.word}</h3>
-                <div class="phonetic">${currentReviewWord.phonetic || ''}</div>
-            </div>
-            <div class="review-hidden" id="review-hidden-content" style="display: none;">
-                <div class="review-meaning">
-                    <p><strong>Meaning:</strong> ${currentReviewWord.chinese_meaning || 'N/A'}</p>
-                    ${currentReviewWord.example_sentence ? `
-                        <p class="example">${currentReviewWord.example_sentence}</p>
-                        <p class="translation">${currentReviewWord.chinese_translation || ''}</p>
-                    ` : ''}
+    // Use the existing HTML structure
+    if (reviewCard) {
+        reviewCard.classList.remove('hidden');
+        if (emptyReview) emptyReview.classList.add('hidden');
+
+        document.getElementById('review-word-text').textContent = currentReviewWord.word;
+        document.getElementById('review-phonetic').textContent = currentReviewWord.phonetic || '';
+        document.getElementById('review-chinese').textContent = currentReviewWord.chinese_meaning || 'N/A';
+        document.getElementById('review-example').textContent = currentReviewWord.example_sentence || '';
+        document.getElementById('review-translation').textContent = currentReviewWord.chinese_translation || '';
+
+        // Reset reveal state
+        document.getElementById('review-meaning').classList.add('hidden');
+        document.getElementById('reveal-btn').classList.remove('hidden');
+        document.getElementById('quality-buttons').classList.add('hidden');
+    } else {
+        // Fallback if HTML structure is different
+        container.innerHTML = `
+            <div class="review-progress">
+                <span>Word ${reviewIndex + 1} of ${reviewQueue.length}</span>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: ${(reviewIndex / reviewQueue.length) * 100}%"></div>
                 </div>
             </div>
-            <button id="btn-reveal" class="btn-reveal">👁️ Reveal Answer</button>
-            <div class="quality-buttons" id="quality-buttons" style="display: none;">
-                <p>How well did you remember?</p>
-                <div class="quality-row">
-                    <button class="quality-btn q0" data-quality="0">😵 Again</button>
-                    <button class="quality-btn q1" data-quality="1">😟 Hard</button>
-                    <button class="quality-btn q2" data-quality="2">😐 Good</button>
-                    <button class="quality-btn q3" data-quality="3">🙂 Easy</button>
-                    <button class="quality-btn q4" data-quality="4">😊 Very Easy</button>
-                    <button class="quality-btn q5" data-quality="5">🤩 Perfect</button>
+            <div class="review-card">
+                <div class="review-word">
+                    <h3>${currentReviewWord.word}</h3>
+                    <div class="phonetic">${currentReviewWord.phonetic || ''}</div>
+                </div>
+                <div class="review-hidden" id="review-hidden-content" style="display: none;">
+                    <div class="review-meaning">
+                        <p><strong>Meaning:</strong> ${currentReviewWord.chinese_meaning || 'N/A'}</p>
+                        ${currentReviewWord.example_sentence ? `
+                            <p class="example">${currentReviewWord.example_sentence}</p>
+                            <p class="translation">${currentReviewWord.chinese_translation || ''}</p>
+                        ` : ''}
+                    </div>
+                </div>
+                <button id="btn-reveal" class="btn-reveal">👁️ Reveal Answer</button>
+                <div class="quality-buttons" id="quality-buttons" style="display: none;">
+                    <p>How well did you remember?</p>
+                    <div class="quality-row">
+                        <button class="quality-btn q0" data-quality="0">😵 Again</button>
+                        <button class="quality-btn q1" data-quality="1">😟 Hard</button>
+                        <button class="quality-btn q2" data-quality="2">😐 Good</button>
+                        <button class="quality-btn q3" data-quality="3">🙂 Easy</button>
+                        <button class="quality-btn q4" data-quality="4">😊 Very Easy</button>
+                        <button class="quality-btn q5" data-quality="5">🤩 Perfect</button>
+                    </div>
                 </div>
             </div>
-        </div>
-    `;
+        `;
 
-    // Attach reveal button listener
-    const revealBtn = document.getElementById('btn-reveal');
-    if (revealBtn) {
-        revealBtn.addEventListener('click', revealReviewAnswer);
-    }
-
-    // Attach quality button listeners
-    document.querySelectorAll('.quality-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const quality = parseInt(e.target.dataset.quality);
-            submitReview(quality);
+        document.getElementById('btn-reveal')?.addEventListener('click', revealReviewAnswer);
+        document.querySelectorAll('.quality-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const quality = parseInt(e.target.dataset.quality);
+                submitReview(quality);
+            });
         });
-    });
+    }
 }
 
 function revealReviewAnswer() {
-    const hiddenContent = document.getElementById('review-hidden-content');
+    const meaning = document.getElementById('review-meaning');
+    const revealBtn = document.getElementById('reveal-btn');
     const qualityButtons = document.getElementById('quality-buttons');
-    const revealBtn = document.getElementById('btn-reveal');
 
-    if (hiddenContent) hiddenContent.style.display = 'block';
-    if (qualityButtons) qualityButtons.style.display = 'block';
-    if (revealBtn) revealBtn.style.display = 'none';
+    if (meaning) meaning.classList.remove('hidden');
+    if (revealBtn) revealBtn.classList.add('hidden');
+    if (qualityButtons) qualityButtons.classList.remove('hidden');
 
     isReviewRevealed = true;
 }
@@ -414,7 +428,7 @@ async function submitReview(quality) {
     if (!currentReviewWord) return;
 
     try {
-        const response = await fetch('/api/review/submit', {
+        const response = await fetch('/review/submit', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -425,10 +439,7 @@ async function submitReview(quality) {
 
         if (!response.ok) throw new Error('Failed to submit review');
 
-        const result = await response.json();
         showToast(`Rated ${quality}/5 ✓`, 'success');
-
-        // Move to next word
         reviewIndex++;
         showNextReviewWord();
 
@@ -454,7 +465,7 @@ async function addWord() {
     showLoading('Searching real news sources...');
 
     try {
-        const response = await fetch('/api/words/add', {
+        const response = await fetch('/words/add', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ word })
@@ -466,7 +477,7 @@ async function addWord() {
         }
 
         const result = await response.json();
-        showToast(`Added: ${result.word}`, 'success');
+        showToast(`Added: ${result.word.word || word}`, 'success');
 
         if (input) input.value = '';
         loadWords();
@@ -517,14 +528,12 @@ function showWordDetail(wordId) {
 
     document.body.appendChild(modal);
 
-    // Close handlers
     modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
     modal.querySelector('.modal-close-btn').addEventListener('click', () => modal.remove());
     modal.addEventListener('click', (e) => {
         if (e.target === modal) modal.remove();
     });
 
-    // Review button in modal - also uses the new endpoint
     modal.querySelector('.btn-review-modal').addEventListener('click', () => {
         modal.remove();
         startSingleWordReview(word.id);
@@ -539,7 +548,7 @@ async function deleteWord(wordId) {
     if (!confirm('Are you sure you want to delete this word?')) return;
 
     try {
-        const response = await fetch(`/api/words/delete/${wordId}`, {
+        const response = await fetch(`/words/delete/${wordId}`, {
             method: 'DELETE'
         });
 
@@ -562,7 +571,7 @@ async function loadQuizTab() {
     if (!container) return;
 
     try {
-        const response = await fetch('/api/review/quiz');
+        const response = await fetch('/review/quiz');
         if (!response.ok) throw new Error('Failed to load quiz');
         const data = await response.json();
 
@@ -639,7 +648,6 @@ async function submitQuizAnswer(selectedIndex) {
 
     if (isCorrect) quizScore++;
 
-    // Show feedback
     const options = document.querySelectorAll('.quiz-option');
     options.forEach((btn, i) => {
         btn.disabled = true;
@@ -650,9 +658,8 @@ async function submitQuizAnswer(selectedIndex) {
         }
     });
 
-    // Update review based on correctness
     try {
-        await fetch('/api/review/quiz/answer', {
+        await fetch('/review/quiz/answer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -678,9 +685,9 @@ async function submitQuizAnswer(selectedIndex) {
 async function loadStats() {
     try {
         const [overview, words, reviews] = await Promise.all([
-            fetch('/api/stats/overview').then(r => r.json()),
-            fetch('/api/stats/words').then(r => r.json()),
-            fetch('/api/stats/reviews').then(r => r.json())
+            fetch('/stats/overview').then(r => r.json()),
+            fetch('/stats/words').then(r => r.json()),
+            fetch('/stats/reviews').then(r => r.json())
         ]);
 
         renderStats(overview, words, reviews);
@@ -691,47 +698,13 @@ async function loadStats() {
 }
 
 function renderStats(overview, words, reviews) {
-    const container = document.getElementById('stats-container');
-    if (!container) return;
-
     const stats = overview.stats || {};
 
-    container.innerHTML = `
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-icon blue">📚</div>
-                <div class="stat-info">
-                    <div class="stat-value">${words.total_words || 0}</div>
-                    <div class="stat-label">Total Words</div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon green">✅</div>
-                <div class="stat-info">
-                    <div class="stat-value">${words.learned_words || 0}</div>
-                    <div class="stat-label">Learned</div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon orange">🔄</div>
-                <div class="stat-info">
-                    <div class="stat-value">${reviews.due_words || 0}</div>
-                    <div class="stat-label">Due Today</div>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon purple">🔥</div>
-                <div class="stat-info">
-                    <div class="stat-value">${stats.current_streak || 0}</div>
-                    <div class="stat-label">Day Streak</div>
-                </div>
-            </div>
-        </div>
-        <div class="stats-mastery">
-            <h3>🏆 Mastery Level</h3>
-            <div class="mastery-badge">${stats.mastery_level || 'Novice'}</div>
-        </div>
-    `;
+    document.getElementById('stat-total').textContent = words.total_words || 0;
+    document.getElementById('stat-learned').textContent = words.learned_words || 0;
+    document.getElementById('stat-reviewed').textContent = reviews.weekly_reviews || 0;
+    document.getElementById('stat-streak').textContent = stats.current_streak || 0;
+    document.getElementById('mastery-text').textContent = stats.mastery_level || 'Novice';
 }
 
 // ========================================
@@ -739,15 +712,16 @@ function renderStats(overview, words, reviews) {
 // ========================================
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Nav buttons
-    Object.keys(navButtons).forEach(key => {
-        if (navButtons[key]) {
-            navButtons[key].addEventListener('click', () => switchTab(key));
-        }
+    // Nav buttons - use data-tab from HTML
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabName = btn.dataset.tab;
+            if (tabName) switchTab(tabName);
+        });
     });
 
-    // Add word button
-    const addBtn = document.getElementById('btn-add-word');
+    // Add word button - matches HTML id="add-btn"
+    const addBtn = document.getElementById('add-btn');
     if (addBtn) {
         addBtn.addEventListener('click', addWord);
     }
@@ -760,9 +734,35 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Review tab start button
+    const startReviewBtn = document.getElementById('start-review-btn');
+    if (startReviewBtn) {
+        startReviewBtn.addEventListener('click', () => loadReviewTab());
+    }
+
+    // Quiz tab start button
+    const startQuizBtn = document.getElementById('start-quiz-btn');
+    if (startQuizBtn) {
+        startQuizBtn.addEventListener('click', () => loadQuizTab());
+    }
+
+    // Reveal button in review card
+    const revealBtn = document.getElementById('reveal-btn');
+    if (revealBtn) {
+        revealBtn.addEventListener('click', revealReviewAnswer);
+    }
+
+    // Quality buttons in review card
+    document.querySelectorAll('.quality-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const quality = parseInt(e.target.dataset.quality);
+            submitReview(quality);
+        });
+    });
+
     // Load initial data
     loadWords();
 
     // Switch to default tab
-    switchTab('words');
+    switchTab('learn');
 });
