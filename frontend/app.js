@@ -1,302 +1,491 @@
-/**
- * AI Vocabulary Assistant - Frontend Logic
- * Handles: API calls, UI updates, review flow, quiz, stats
- */
-
 // ========================================
-// CONFIGURATION
+// AI Vocabulary Assistant - Frontend
+// Fixed Review Logic - Word Card Review Works Anytime
 // ========================================
 
-const API_BASE = window.location.origin.includes('localhost') 
-    ? 'http://localhost:8000' 
-    : window.location.origin;
-
-// ========================================
-// STATE
-// ========================================
-
-let currentWords = [];
+// State
+let words = [];
 let reviewQueue = [];
 let reviewIndex = 0;
+let currentReviewWord = null;
+let isReviewRevealed = false;
 let quizQueue = [];
 let quizIndex = 0;
 let quizScore = 0;
+let currentQuizQuestion = null;
+let currentTab = 'words';
 
-// ========================================
-// DOM ELEMENTS
-// ========================================
+// DOM Elements
+const tabs = {
+    words: document.getElementById('tab-words'),
+    review: document.getElementById('tab-review'),
+    quiz: document.getElementById('tab-quiz'),
+    stats: document.getElementById('tab-stats')
+};
 
-const elements = {
-    wordInput: document.getElementById('word-input'),
-    addBtn: document.getElementById('add-btn'),
-    realExamplesToggle: document.getElementById('real-examples'),
-    loading: document.getElementById('loading'),
-    wordsGrid: document.getElementById('words-grid'),
-    emptyWords: document.getElementById('empty-words'),
-    reviewBadge: document.getElementById('review-badge'),
-    streakCount: document.getElementById('streak-count'),
-    wordCount: document.getElementById('word-count'),
-
-    // Review elements
-    reviewContainer: document.getElementById('review-container'),
-    reviewCard: document.getElementById('review-card'),
-    reviewWordText: document.getElementById('review-word-text'),
-    reviewPhonetic: document.getElementById('review-phonetic'),
-    reviewMeaning: document.getElementById('review-meaning'),
-    reviewChinese: document.getElementById('review-chinese'),
-    reviewExample: document.getElementById('review-example'),
-    reviewTranslation: document.getElementById('review-translation'),
-    revealBtn: document.getElementById('reveal-btn'),
-    qualityButtons: document.getElementById('quality-buttons'),
-    emptyReview: document.getElementById('empty-review'),
-    startReviewBtn: document.getElementById('start-review-btn'),
-
-    // Quiz elements
-    quizContainer: document.getElementById('quiz-container'),
-    quizCard: document.getElementById('quiz-card'),
-    quizProgress: document.getElementById('quiz-progress'),
-    quizCounter: document.getElementById('quiz-counter'),
-    quizQuestionText: document.getElementById('quiz-question-text'),
-    quizOptions: document.getElementById('quiz-options'),
-    quizFeedback: document.getElementById('quiz-feedback'),
-    feedbackIcon: document.getElementById('feedback-icon'),
-    feedbackText: document.getElementById('feedback-text'),
-    nextQuizBtn: document.getElementById('next-quiz-btn'),
-    quizResults: document.getElementById('quiz-results'),
-    quizScoreEl: document.getElementById('quiz-score'),
-    quizTotalEl: document.getElementById('quiz-total'),
-    quizMessage: document.getElementById('quiz-message'),
-    retryQuizBtn: document.getElementById('retry-quiz-btn'),
-    emptyQuiz: document.getElementById('empty-quiz'),
-    startQuizBtn: document.getElementById('start-quiz-btn'),
-
-    // Stats elements
-    statTotal: document.getElementById('stat-total'),
-    statLearned: document.getElementById('stat-learned'),
-    statReviewed: document.getElementById('stat-reviewed'),
-    statStreak: document.getElementById('stat-streak'),
-    weeklyChart: document.getElementById('weekly-chart'),
-    masteryText: document.getElementById('mastery-text'),
-
-    // Toast
-    toastContainer: document.getElementById('toast-container')
+const navButtons = {
+    words: document.getElementById('nav-words'),
+    review: document.getElementById('nav-review'),
+    quiz: document.getElementById('nav-quiz'),
+    stats: document.getElementById('nav-stats')
 };
 
 // ========================================
-// INITIALIZATION
+// UTILITY
 // ========================================
 
-document.addEventListener('DOMContentLoaded', () => {
-    initNavigation();
-    initAddWord();
-    initReview();
-    initQuiz();
-    initFilters();
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container') || createToastContainer();
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = `<span>${message}</span>`;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
 
-    // Load initial data
-    loadWords();
-    loadStats();
-    loadDueCount();
-});
+function createToastContainer() {
+    const container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+    return container;
+}
+
+function showLoading(message = 'Loading...') {
+    const existing = document.getElementById('loading-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'loading-overlay';
+    overlay.className = 'loading-overlay';
+    overlay.innerHTML = `
+        <div class="loading">
+            <div class="spinner"></div>
+            <p>${message}</p>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+}
+
+function hideLoading() {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) overlay.remove();
+}
 
 // ========================================
-// NAVIGATION
+// TAB NAVIGATION
 // ========================================
 
-function initNavigation() {
-    const navBtns = document.querySelectorAll('.nav-btn');
-    const tabContents = document.querySelectorAll('.tab-content');
+function switchTab(tabName) {
+    // Update tab visibility
+    Object.keys(tabs).forEach(key => {
+        if (tabs[key]) {
+            tabs[key].classList.toggle('active', key === tabName);
+        }
+    });
 
-    navBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tab = btn.dataset.tab;
+    // Update nav buttons
+    Object.keys(navButtons).forEach(key => {
+        if (navButtons[key]) {
+            navButtons[key].classList.toggle('active', key === tabName);
+        }
+    });
 
-            // Update nav
-            navBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+    currentTab = tabName;
 
-            // Update content
-            tabContents.forEach(c => c.classList.remove('active'));
-            document.getElementById(`tab-${tab}`).classList.add('active');
+    // Refresh tab content
+    if (tabName === 'words') loadWords();
+    if (tabName === 'review') loadReviewTab();
+    if (tabName === 'quiz') loadQuizTab();
+    if (tabName === 'stats') loadStats();
+}
 
-            // Refresh data
-            if (tab === 'stats') loadStats();
-            if (tab === 'learn') loadWords();
+// ========================================
+// WORDS TAB
+// ========================================
+
+async function loadWords() {
+    try {
+        const response = await fetch('/api/words/list');
+        if (!response.ok) throw new Error('Failed to load words');
+        words = await response.json();
+        renderWords();
+    } catch (error) {
+        showToast('Failed to load words', 'error');
+        console.error(error);
+    }
+}
+
+function renderWords() {
+    const container = document.getElementById('words-list');
+    if (!container) return;
+
+    if (words.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>No words yet. Add your first word above!</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = words.map(word => `
+        <div class="word-card ${word.learned ? 'learned' : ''} ${word.is_due ? 'due' : ''}" data-word-id="${word.id}">
+            <div class="word-header">
+                <div>
+                    <div class="word-title">${word.word}</div>
+                    <div class="word-phonetic">${word.phonetic || ''}</div>
+                </div>
+                <span class="word-pos">${word.part_of_speech || 'N/A'}</span>
+            </div>
+            <div class="word-meaning">${word.chinese_meaning || 'No meaning yet'}</div>
+            ${word.example_sentence ? `
+                <div class="word-example">${word.example_sentence}</div>
+            ` : ''}
+            <div class="word-actions">
+                <button class="btn-review-word" data-word-id="${word.id}">
+                    🔄 Review
+                </button>
+                <button class="btn-detail-word" data-word-id="${word.id}">
+                    📖 Details
+                </button>
+                <button class="btn-delete-word" data-word-id="${word.id}">
+                    🗑️ Delete
+                </button>
+            </div>
+        </div>
+    `).join('');
+
+    // Attach event listeners
+    attachWordCardListeners();
+}
+
+function attachWordCardListeners() {
+    // Review button on word card - FIXED: Uses new endpoint
+    document.querySelectorAll('.btn-review-word').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wordId = parseInt(btn.dataset.wordId);
+            startSingleWordReview(wordId);
         });
     });
+
+    // Detail button
+    document.querySelectorAll('.btn-detail-word').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wordId = parseInt(btn.dataset.wordId);
+            showWordDetail(wordId);
+        });
+    });
+
+    // Delete button
+    document.querySelectorAll('.btn-delete-word').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wordId = parseInt(btn.dataset.wordId);
+            deleteWord(wordId);
+        });
+    });
+}
+
+// ========================================
+// REVIEW - THE FIXED PART
+// ========================================
+
+function resetReviewState() {
+    reviewQueue = [];
+    reviewIndex = 0;
+    currentReviewWord = null;
+    isReviewRevealed = false;
+}
+
+// Load review tab - shows due words list + start button
+async function loadReviewTab() {
+    const container = document.getElementById('review-container');
+    if (!container) return;
+
+    try {
+        const response = await fetch('/api/review/due');
+        if (!response.ok) throw new Error('Failed to load due words');
+        const data = await response.json();
+
+        const dueWords = data.due_words || [];
+
+        if (dueWords.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <p>No words due for review. Great job! 🎉</p>
+                </div>
+            `;
+            return;
+        }
+
+        // Show due words list with start button
+        container.innerHTML = `
+            <div class="review-intro">
+                <h3>📚 ${dueWords.length} words due for review</h3>
+                <button id="btn-start-review" class="btn-primary">
+                    🚀 Start Review Session
+                </button>
+            </div>
+            <div class="due-words-preview">
+                ${dueWords.map(w => `
+                    <div class="due-word-item">
+                        <span class="due-word-name">${w.word}</span>
+                        <span class="due-word-meaning">${w.chinese_meaning || ''}</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+
+        // Attach start button listener
+        const startBtn = document.getElementById('btn-start-review');
+        if (startBtn) {
+            startBtn.addEventListener('click', () => startReviewSession(dueWords));
+        }
+
+    } catch (error) {
+        showToast('Failed to load review', 'error');
+        console.error(error);
+    }
+}
+
+// Start a full review session (from Review tab)
+function startReviewSession(dueWords) {
+    resetReviewState();
+    reviewQueue = [...dueWords];
+    reviewIndex = 0;
+    showNextReviewWord();
+}
+
+// ========== FIXED: Word Card Review ==========
+// Uses NEW endpoint: GET /api/review/word/{word_id}
+// This works even if the word is NOT due!
+
+async function startSingleWordReview(wordId) {
+    resetReviewState();
+
+    // Switch to review tab first
+    switchTab('review');
+
+    const container = document.getElementById('review-container');
+    if (!container) return;
+
+    showLoading('Loading word...');
+
+    try {
+        // NEW: Use the force-review endpoint
+        const response = await fetch(`/api/review/word/${wordId}`);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to load word');
+        }
+
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.message || 'Failed to load word');
+        }
+
+        // Create a single-word review queue
+        reviewQueue = [{
+            word_id: data.word_id,
+            word: data.word,
+            phonetic: data.phonetic,
+            chinese_meaning: data.chinese_meaning,
+            example_sentence: data.example_sentence,
+            chinese_translation: data.chinese_translation
+        }];
+        reviewIndex = 0;
+
+        hideLoading();
+        showNextReviewWord();
+
+    } catch (error) {
+        hideLoading();
+        showToast(error.message, 'error');
+        console.error(error);
+
+        // Show error in review tab
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>❌ ${error.message}</p>
+                <button class="btn-primary" onclick="switchTab('words')">Back to Words</button>
+            </div>
+        `;
+    }
+}
+
+function showNextReviewWord() {
+    const container = document.getElementById('review-container');
+    if (!container) return;
+
+    // Check if review is complete
+    if (reviewIndex >= reviewQueue.length) {
+        container.innerHTML = `
+            <div class="review-complete">
+                <h2>🎉 Review Complete!</h2>
+                <p>You reviewed ${reviewQueue.length} words.</p>
+                <button id="btn-review-again" class="btn-primary">Review Again</button>
+                <button id="btn-back-menu" class="btn-secondary">Back to Menu</button>
+            </div>
+        `;
+
+        document.getElementById('btn-review-again')?.addEventListener('click', () => {
+            resetReviewState();
+            loadReviewTab();
+        });
+
+        document.getElementById('btn-back-menu')?.addEventListener('click', () => {
+            switchTab('words');
+        });
+
+        return;
+    }
+
+    currentReviewWord = reviewQueue[reviewIndex];
+    isReviewRevealed = false;
+
+    container.innerHTML = `
+        <div class="review-progress">
+            <span>Word ${reviewIndex + 1} of ${reviewQueue.length}</span>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: ${(reviewIndex / reviewQueue.length) * 100}%"></div>
+            </div>
+        </div>
+        <div class="review-card">
+            <div class="review-word">
+                <h3>${currentReviewWord.word}</h3>
+                <div class="phonetic">${currentReviewWord.phonetic || ''}</div>
+            </div>
+            <div class="review-hidden" id="review-hidden-content" style="display: none;">
+                <div class="review-meaning">
+                    <p><strong>Meaning:</strong> ${currentReviewWord.chinese_meaning || 'N/A'}</p>
+                    ${currentReviewWord.example_sentence ? `
+                        <p class="example">${currentReviewWord.example_sentence}</p>
+                        <p class="translation">${currentReviewWord.chinese_translation || ''}</p>
+                    ` : ''}
+                </div>
+            </div>
+            <button id="btn-reveal" class="btn-reveal">👁️ Reveal Answer</button>
+            <div class="quality-buttons" id="quality-buttons" style="display: none;">
+                <p>How well did you remember?</p>
+                <div class="quality-row">
+                    <button class="quality-btn q0" data-quality="0">😵 Again</button>
+                    <button class="quality-btn q1" data-quality="1">😟 Hard</button>
+                    <button class="quality-btn q2" data-quality="2">😐 Good</button>
+                    <button class="quality-btn q3" data-quality="3">🙂 Easy</button>
+                    <button class="quality-btn q4" data-quality="4">😊 Very Easy</button>
+                    <button class="quality-btn q5" data-quality="5">🤩 Perfect</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Attach reveal button listener
+    const revealBtn = document.getElementById('btn-reveal');
+    if (revealBtn) {
+        revealBtn.addEventListener('click', revealReviewAnswer);
+    }
+
+    // Attach quality button listeners
+    document.querySelectorAll('.quality-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const quality = parseInt(e.target.dataset.quality);
+            submitReview(quality);
+        });
+    });
+}
+
+function revealReviewAnswer() {
+    const hiddenContent = document.getElementById('review-hidden-content');
+    const qualityButtons = document.getElementById('quality-buttons');
+    const revealBtn = document.getElementById('btn-reveal');
+
+    if (hiddenContent) hiddenContent.style.display = 'block';
+    if (qualityButtons) qualityButtons.style.display = 'block';
+    if (revealBtn) revealBtn.style.display = 'none';
+
+    isReviewRevealed = true;
+}
+
+async function submitReview(quality) {
+    if (!currentReviewWord) return;
+
+    try {
+        const response = await fetch('/api/review/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                word_id: currentReviewWord.word_id,
+                quality: quality
+            })
+        });
+
+        if (!response.ok) throw new Error('Failed to submit review');
+
+        const result = await response.json();
+        showToast(`Rated ${quality}/5 ✓`, 'success');
+
+        // Move to next word
+        reviewIndex++;
+        showNextReviewWord();
+
+    } catch (error) {
+        showToast('Failed to submit review', 'error');
+        console.error(error);
+    }
 }
 
 // ========================================
 // ADD WORD
 // ========================================
 
-function initAddWord() {
-    elements.addBtn.addEventListener('click', handleAddWord);
-    elements.wordInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') handleAddWord();
-    });
-}
+async function addWord() {
+    const input = document.getElementById('word-input');
+    const word = input?.value.trim();
 
-async function handleAddWord() {
-    const word = elements.wordInput.value.trim();
     if (!word) {
         showToast('Please enter a word', 'error');
         return;
     }
 
-    const useRealExamples = elements.realExamplesToggle.checked;
-
-    elements.loading.classList.remove('hidden');
-    elements.addBtn.disabled = true;
+    showLoading('Searching real news sources...');
 
     try {
-        if (useRealExamples) {
-            // Use Example Search Agent (Tavily + Qwen)
-            const response = await fetch(`${API_BASE}/agents/example-search`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ word })
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                showToast(`Added "${word}" with real example!`, 'success');
-                elements.wordInput.value = '';
-                loadWords();
-                loadStats();
-                loadDueCount();
-            } else {
-                showToast(result.data?.error || 'Failed to add word', 'error');
-            }
-        } else {
-            // Simple add without search
-            const response = await fetch(`${API_BASE}/words/add`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ word })
-            });
-
-            const result = await response.json();
-            showToast(`Added "${word}"!`, 'success');
-            elements.wordInput.value = '';
-            loadWords();
-        }
-    } catch (error) {
-        showToast(`Error: ${error.message}`, 'error');
-    } finally {
-        elements.loading.classList.add('hidden');
-        elements.addBtn.disabled = false;
-    }
-}
-
-// ========================================
-// WORDS LIST
-// ========================================
-
-async function loadWords(filter = 'all') {
-    try {
-        const response = await fetch(`${API_BASE}/words/list?limit=100`);
-        const words = await response.json();
-        currentWords = words;
-
-        renderWords(words, filter);
-        elements.wordCount.textContent = words.length;
-    } catch (error) {
-        console.error('Failed to load words:', error);
-    }
-}
-
-function renderWords(words, filter = 'all') {
-    elements.wordsGrid.innerHTML = '';
-
-    let filtered = words;
-    if (filter === 'due') {
-        // Filter due words (simplified - in production check review dates)
-        filtered = words.filter(w => !w.learned);
-    } else if (filter === 'learned') {
-        filtered = words.filter(w => w.learned);
-    }
-
-    if (filtered.length === 0) {
-        elements.emptyWords.classList.remove('hidden');
-        return;
-    }
-
-    elements.emptyWords.classList.add('hidden');
-
-    filtered.forEach(word => {
-        const card = createWordCard(word);
-        elements.wordsGrid.appendChild(card);
-    });
-}
-
-function createWordCard(word) {
-    const card = document.createElement('div');
-    card.className = `word-card ${word.learned ? 'learned' : ''}`;
-
-    const collocations = word.collocations ? word.collocations.slice(0, 2) : [];
-    const tags = word.tags || [];
-
-    card.innerHTML = `
-        <div class="word-header">
-            <div>
-                <div class="word-title">${word.word}</div>
-                <span class="word-phonetic">${word.phonetic || ''}</span>
-            </div>
-            <span class="word-pos">${word.part_of_speech || 'word'}</span>
-        </div>
-        <div class="word-meaning">${word.chinese_meaning || 'No meaning yet'}</div>
-        ${word.example_sentence ? `
-            <div class="word-example">"${word.example_sentence.substring(0, 120)}..."</div>
-        ` : ''}
-        ${word.source_name ? `
-            <div class="word-source">
-                <i class="fas fa-newspaper"></i>
-                ${word.source_name}
-                ${word.source_url ? `<a href="${word.source_url}" target="_blank"><i class="fas fa-external-link-alt"></i></a>` : ''}
-            </div>
-        ` : ''}
-        ${collocations.length > 0 ? `
-            <div class="word-tags">
-                ${collocations.map(c => `<span class="tag">${c}</span>`).join('')}
-            </div>
-        ` : ''}
-        <div class="word-actions">
-            <button onclick="playAudio('${word.word}')">
-                <i class="fas fa-volume-up"></i> Listen
-            </button>
-            <button onclick="startReviewWord(${word.id})">
-                <i class="fas fa-sync-alt"></i> Review
-            </button>
-            <button onclick="deleteWord(${word.id})">
-                <i class="fas fa-trash"></i>
-            </button>
-        </div>
-    `;
-
-    card.addEventListener('click', (e) => {
-        if (!e.target.closest('button')) {
-            showWordDetail(word);
-        }
-    });
-
-    return card;
-}
-
-function initFilters() {
-    const filterBtns = document.querySelectorAll('.filter-btn');
-    filterBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            filterBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            renderWords(currentWords, btn.dataset.filter);
+        const response = await fetch('/api/words/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ word })
         });
-    });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to add word');
+        }
+
+        const result = await response.json();
+        showToast(`Added: ${result.word}`, 'success');
+
+        if (input) input.value = '';
+        loadWords();
+
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        hideLoading();
+    }
 }
 
-function showWordDetail(word) {
-    // Create modal
+// ========================================
+// WORD DETAIL MODAL
+// ========================================
+
+function showWordDetail(wordId) {
+    const word = words.find(w => w.id === wordId);
+    if (!word) return;
+
     const modal = document.createElement('div');
     modal.className = 'modal-overlay';
     modal.innerHTML = `
@@ -307,370 +496,273 @@ function showWordDetail(word) {
             </div>
             <div class="modal-body">
                 <p><strong>Phonetic:</strong> ${word.phonetic || 'N/A'}</p>
-                <p><strong>Part of Speech:</strong> ${word.part_of_speech || 'N/A'}</p>
+                <p><strong>POS:</strong> ${word.part_of_speech || 'N/A'}</p>
                 <p><strong>Meaning:</strong> ${word.chinese_meaning || 'N/A'}</p>
-                <hr style="margin: 16px 0; border: none; border-top: 1px solid var(--border);">
+                <hr>
                 <p><strong>Example:</strong></p>
-                <p style="font-style: italic; color: var(--text-secondary);">${word.example_sentence || 'N/A'}</p>
-                <p style="color: var(--primary); margin-top: 8px;">${word.chinese_translation || ''}</p>
-                <hr style="margin: 16px 0; border: none; border-top: 1px solid var(--border);">
+                <p class="word-example">${word.example_sentence || 'N/A'}</p>
+                <p>${word.chinese_translation || ''}</p>
+                <hr>
                 <p><strong>Source:</strong> ${word.source_name || 'N/A'}</p>
-                ${word.source_url ? `<p><a href="${word.source_url}" target="_blank">Read Article <i class="fas fa-external-link-alt"></i></a></p>` : ''}
                 ${word.collocations ? `<p><strong>Collocations:</strong> ${word.collocations.join(', ')}</p>` : ''}
                 ${word.synonyms ? `<p><strong>Synonyms:</strong> ${word.synonyms.join(', ')}</p>` : ''}
                 ${word.antonyms ? `<p><strong>Antonyms:</strong> ${word.antonyms.join(', ')}</p>` : ''}
             </div>
             <div class="modal-footer">
-                <button class="btn-secondary" onclick="playAudio('${word.word}')">
-                    <i class="fas fa-volume-up"></i> Listen
-                </button>
-                <button class="btn-primary" onclick="startReviewWord(${word.id})">
-                    <i class="fas fa-sync-alt"></i> Review Now
-                </button>
+                <button class="btn-primary btn-review-modal" data-word-id="${word.id}">🔄 Review</button>
+                <button class="btn-secondary modal-close-btn">Close</button>
             </div>
         </div>
     `;
 
+    document.body.appendChild(modal);
+
+    // Close handlers
     modal.querySelector('.modal-close').addEventListener('click', () => modal.remove());
+    modal.querySelector('.modal-close-btn').addEventListener('click', () => modal.remove());
     modal.addEventListener('click', (e) => {
         if (e.target === modal) modal.remove();
     });
 
-    document.body.appendChild(modal);
+    // Review button in modal - also uses the new endpoint
+    modal.querySelector('.btn-review-modal').addEventListener('click', () => {
+        modal.remove();
+        startSingleWordReview(word.id);
+    });
 }
+
+// ========================================
+// DELETE WORD
+// ========================================
 
 async function deleteWord(wordId) {
     if (!confirm('Are you sure you want to delete this word?')) return;
 
     try {
-        await fetch(`${API_BASE}/words/delete/${wordId}`, { method: 'DELETE' });
+        const response = await fetch(`/api/words/delete/${wordId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) throw new Error('Failed to delete');
+
         showToast('Word deleted', 'success');
         loadWords();
-        loadStats();
+
     } catch (error) {
         showToast('Failed to delete word', 'error');
     }
-}
-
-function playAudio(word) {
-    // Placeholder for TTS - would integrate with Qwen TTS or browser TTS
-    if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance(word);
-        utterance.lang = 'en-US';
-        speechSynthesis.speak(utterance);
-        showToast(`Playing: ${word}`, 'info');
-    } else {
-        showToast('Audio not supported in this browser', 'error');
-    }
-}
-
-// ========================================
-// REVIEW
-// ========================================
-
-function initReview() {
-    elements.startReviewBtn.addEventListener('click', startReviewSession);
-    elements.revealBtn.addEventListener('click', revealAnswer);
-
-    // Quality buttons
-    document.querySelectorAll('.quality-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const quality = parseInt(btn.dataset.quality);
-            submitReview(quality);
-        });
-    });
-}
-
-async function startReviewSession() {
-    try {
-        const response = await fetch(`${API_BASE}/review/due`);
-        const result = await response.json();
-
-        if (!result.success || result.due_count === 0) {
-            elements.reviewCard.classList.add('hidden');
-            elements.emptyReview.classList.remove('hidden');
-            return;
-        }
-
-        reviewQueue = result.due_words;
-        reviewIndex = 0;
-
-        elements.emptyReview.classList.add('hidden');
-        elements.reviewCard.classList.remove('hidden');
-
-        showReviewCard();
-    } catch (error) {
-        showToast('Failed to load review words', 'error');
-    }
-}
-
-function showReviewCard() {
-    if (reviewIndex >= reviewQueue.length) {
-        elements.reviewCard.classList.add('hidden');
-        elements.emptyReview.classList.remove('hidden');
-        elements.emptyReview.innerHTML = `
-            <i class="fas fa-check-circle" style="color: var(--secondary);"></i>
-            <p>Review complete! You reviewed ${reviewQueue.length} words.</p>
-        `;
-        loadDueCount();
-        loadStats();
-        return;
-    }
-
-    const word = reviewQueue[reviewIndex];
-
-    elements.reviewWordText.textContent = word.word;
-    elements.reviewPhonetic.textContent = word.phonetic || '';
-    elements.reviewChinese.textContent = word.chinese_meaning || '';
-    elements.reviewExample.textContent = word.example_sentence || '';
-    elements.reviewTranslation.textContent = word.chinese_translation || '';
-
-    // Reset state
-    elements.reviewMeaning.classList.add('hidden');
-    elements.revealBtn.classList.remove('hidden');
-    elements.qualityButtons.classList.add('hidden');
-}
-
-function revealAnswer() {
-    elements.reviewMeaning.classList.remove('hidden');
-    elements.revealBtn.classList.add('hidden');
-    elements.qualityButtons.classList.remove('hidden');
-}
-
-async function submitReview(quality) {
-    const word = reviewQueue[reviewIndex];
-
-    try {
-        await fetch(`${API_BASE}/review/submit`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ word_id: word.word_id, quality })
-        });
-
-        reviewIndex++;
-        showReviewCard();
-    } catch (error) {
-        showToast('Failed to submit review', 'error');
-    }
-}
-
-function startReviewWord(wordId) {
-    // Switch to review tab and start with specific word
-    document.querySelector('[data-tab="review"]').click();
-    // In production, would filter review queue to start with this word
 }
 
 // ========================================
 // QUIZ
 // ========================================
 
-function initQuiz() {
-    elements.startQuizBtn.addEventListener('click', startQuizSession);
-    elements.nextQuizBtn.addEventListener('click', showNextQuizQuestion);
-    elements.retryQuizBtn.addEventListener('click', startQuizSession);
-}
+async function loadQuizTab() {
+    const container = document.getElementById('quiz-container');
+    if (!container) return;
 
-async function startQuizSession() {
     try {
-        const response = await fetch(`${API_BASE}/review/quiz`);
-        const result = await response.json();
+        const response = await fetch('/api/review/quiz');
+        if (!response.ok) throw new Error('Failed to load quiz');
+        const data = await response.json();
 
-        if (!result.success || !result.quiz || result.quiz.length === 0) {
-            elements.quizCard.classList.add('hidden');
-            elements.quizResults.classList.add('hidden');
-            elements.emptyQuiz.classList.remove('hidden');
-            return;
-        }
-
-        quizQueue = result.quiz;
+        quizQueue = data.quiz || [];
         quizIndex = 0;
         quizScore = 0;
 
-        elements.emptyQuiz.classList.add('hidden');
-        elements.quizResults.classList.add('hidden');
-        elements.quizCard.classList.remove('hidden');
+        if (quizQueue.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <p>No quiz available. Add more words first!</p>
+                </div>
+            `;
+            return;
+        }
 
         showNextQuizQuestion();
+
     } catch (error) {
         showToast('Failed to load quiz', 'error');
     }
 }
 
 function showNextQuizQuestion() {
+    const container = document.getElementById('quiz-container');
+    if (!container) return;
+
     if (quizIndex >= quizQueue.length) {
-        showQuizResults();
+        const percentage = quizQueue.length > 0 ? Math.round((quizScore / quizQueue.length) * 100) : 0;
+        container.innerHTML = `
+            <div class="quiz-results">
+                <div class="results-icon">🎯</div>
+                <h2>Quiz Complete!</h2>
+                <div class="score-display">${quizScore}/${quizQueue.length} (${percentage}%)</div>
+                <p>${percentage >= 80 ? '🌟 Excellent!' : percentage >= 60 ? '👍 Good job!' : '💪 Keep practicing!'}</p>
+                <button class="btn-primary" onclick="loadQuizTab()">Try Again</button>
+            </div>
+        `;
         return;
     }
 
-    const question = quizQueue[quizIndex];
+    currentQuizQuestion = quizQueue[quizIndex];
 
-    // Update progress
-    const progress = ((quizIndex + 1) / quizQueue.length) * 100;
-    elements.quizProgress.style.width = `${progress}%`;
-    elements.quizCounter.textContent = `${quizIndex + 1}/${quizQueue.length}`;
+    container.innerHTML = `
+        <div class="quiz-progress">
+            <span>Question ${quizIndex + 1}/${quizQueue.length}</span>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width: ${(quizIndex / quizQueue.length) * 100}%"></div>
+            </div>
+        </div>
+        <div class="quiz-question">${currentQuizQuestion.question}</div>
+        <div class="quiz-options">
+            ${currentQuizQuestion.options.map((opt, i) => `
+                <button class="quiz-option" data-index="${i}">
+                    <span class="option-letter">${String.fromCharCode(65 + i)}</span>
+                    <span>${opt}</span>
+                </button>
+            `).join('')}
+        </div>
+    `;
 
-    // Update question
-    elements.quizQuestionText.textContent = question.question;
-    elements.quizFeedback.classList.add('hidden');
-
-    // Update options
-    elements.quizOptions.innerHTML = '';
-    question.options.forEach((option, index) => {
-        const btn = document.createElement('button');
-        btn.className = 'quiz-option';
-        btn.innerHTML = `
-            <span class="option-letter">${String.fromCharCode(65 + index)}</span>
-            <span>${option}</span>
-        `;
-        btn.addEventListener('click', () => handleQuizAnswer(index, question.correct_index, question.word_id));
-        elements.quizOptions.appendChild(btn);
+    document.querySelectorAll('.quiz-option').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const selectedIndex = parseInt(e.currentTarget.dataset.index);
+            submitQuizAnswer(selectedIndex);
+        });
     });
 }
 
-async function handleQuizAnswer(selected, correct, wordId) {
-    const isCorrect = selected === correct;
+async function submitQuizAnswer(selectedIndex) {
+    if (!currentQuizQuestion) return;
 
-    if (isCorrect) {
-        quizScore++;
-    }
+    const isCorrect = selectedIndex === currentQuizQuestion.correct_index;
+
+    if (isCorrect) quizScore++;
 
     // Show feedback
-    const options = elements.quizOptions.querySelectorAll('.quiz-option');
-    options[selected].classList.add(isCorrect ? 'correct' : 'wrong');
-    if (!isCorrect) {
-        options[correct].classList.add('correct');
-    }
+    const options = document.querySelectorAll('.quiz-option');
+    options.forEach((btn, i) => {
+        btn.disabled = true;
+        if (i === currentQuizQuestion.correct_index) {
+            btn.classList.add('correct');
+        } else if (i === selectedIndex && !isCorrect) {
+            btn.classList.add('wrong');
+        }
+    });
 
-    // Disable all options
-    options.forEach(opt => opt.style.pointerEvents = 'none');
-
-    elements.feedbackIcon.textContent = isCorrect ? '🎉' : '😔';
-    elements.feedbackText.textContent = isCorrect ? 'Correct! Great job!' : 'Not quite right. Keep practicing!';
-    elements.quizFeedback.classList.remove('hidden');
-
-    // Submit review based on correctness
-    const quality = isCorrect ? 4 : 1;
+    // Update review based on correctness
     try {
-        await fetch(`${API_BASE}/review/submit`, {
+        await fetch('/api/review/quiz/answer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ word_id: wordId, quality })
+            body: JSON.stringify({
+                word_id: currentQuizQuestion.word_id,
+                selected_index: selectedIndex,
+                correct_index: currentQuizQuestion.correct_index
+            })
         });
-    } catch (e) {
-        console.error('Failed to submit quiz review:', e);
+    } catch (error) {
+        console.error('Failed to update review:', error);
     }
 
-    quizIndex++;
-}
-
-function showQuizResults() {
-    elements.quizCard.classList.add('hidden');
-    elements.quizResults.classList.remove('hidden');
-
-    const percentage = Math.round((quizScore / quizQueue.length) * 100);
-
-    elements.quizScoreEl.textContent = quizScore;
-    elements.quizTotalEl.textContent = quizQueue.length;
-
-    let message = '';
-    if (percentage >= 80) {
-        message = 'Excellent! You are mastering these words! 🌟';
-    } else if (percentage >= 60) {
-        message = 'Good job! Keep practicing! 👍';
-    } else {
-        message = 'Keep studying! You will get better! 💪';
-    }
-    elements.quizMessage.textContent = message;
-
-    loadStats();
-    loadDueCount();
+    setTimeout(() => {
+        quizIndex++;
+        showNextQuizQuestion();
+    }, 1500);
 }
 
 // ========================================
-// STATISTICS
+// STATS
 // ========================================
 
 async function loadStats() {
     try {
-        const response = await fetch(`${API_BASE}/stats/overview`);
-        const result = await response.json();
+        const [overview, words, reviews] = await Promise.all([
+            fetch('/api/stats/overview').then(r => r.json()),
+            fetch('/api/stats/words').then(r => r.json()),
+            fetch('/api/stats/reviews').then(r => r.json())
+        ]);
 
-        if (result.success) {
-            const stats = result.stats;
-            elements.statTotal.textContent = stats.total_words;
-            elements.statLearned.textContent = stats.learned_words;
-            elements.statReviewed.textContent = stats.weekly_reviews;
-            elements.statStreak.textContent = stats.current_streak;
-            elements.streakCount.textContent = stats.current_streak;
-            elements.masteryText.textContent = stats.mastery_level;
+        renderStats(overview, words, reviews);
 
-            // Update weekly chart (mock data for now)
-            renderWeeklyChart();
-        }
     } catch (error) {
-        console.error('Failed to load stats:', error);
+        showToast('Failed to load stats', 'error');
     }
 }
 
-function renderWeeklyChart() {
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const values = [3, 5, 2, 7, 4, 6, 8]; // Mock data
-    const max = Math.max(...values);
+function renderStats(overview, words, reviews) {
+    const container = document.getElementById('stats-container');
+    if (!container) return;
 
-    elements.weeklyChart.innerHTML = '';
-    days.forEach((day, i) => {
-        const bar = document.createElement('div');
-        bar.className = 'chart-bar';
-        bar.style.height = `${(values[i] / max) * 100}%`;
-        bar.setAttribute('data-day', day);
-        elements.weeklyChart.appendChild(bar);
+    const stats = overview.stats || {};
+
+    container.innerHTML = `
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-icon blue">📚</div>
+                <div class="stat-info">
+                    <div class="stat-value">${words.total_words || 0}</div>
+                    <div class="stat-label">Total Words</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon green">✅</div>
+                <div class="stat-info">
+                    <div class="stat-value">${words.learned_words || 0}</div>
+                    <div class="stat-label">Learned</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon orange">🔄</div>
+                <div class="stat-info">
+                    <div class="stat-value">${reviews.due_words || 0}</div>
+                    <div class="stat-label">Due Today</div>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon purple">🔥</div>
+                <div class="stat-info">
+                    <div class="stat-value">${stats.current_streak || 0}</div>
+                    <div class="stat-label">Day Streak</div>
+                </div>
+            </div>
+        </div>
+        <div class="stats-mastery">
+            <h3>🏆 Mastery Level</h3>
+            <div class="mastery-badge">${stats.mastery_level || 'Novice'}</div>
+        </div>
+    `;
+}
+
+// ========================================
+// INITIALIZATION
+// ========================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    // Nav buttons
+    Object.keys(navButtons).forEach(key => {
+        if (navButtons[key]) {
+            navButtons[key].addEventListener('click', () => switchTab(key));
+        }
     });
-}
 
-async function loadDueCount() {
-    try {
-        const response = await fetch(`${API_BASE}/review/due`);
-        const result = await response.json();
-
-        if (result.success) {
-            const count = result.due_count || 0;
-            elements.reviewBadge.textContent = count;
-            elements.reviewBadge.style.display = count > 0 ? 'block' : 'none';
-        }
-    } catch (error) {
-        console.error('Failed to load due count:', error);
+    // Add word button
+    const addBtn = document.getElementById('btn-add-word');
+    if (addBtn) {
+        addBtn.addEventListener('click', addWord);
     }
-}
 
-// ========================================
-// TOAST NOTIFICATIONS
-// ========================================
-
-function showToast(message, type = 'info') {
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-
-    const icons = {
-        success: '✅',
-        error: '❌',
-        info: 'ℹ️'
-    };
-
-    toast.innerHTML = `<span>${icons[type]}</span> ${message}`;
-    elements.toastContainer.appendChild(toast);
-
-    setTimeout(() => {
-        toast.style.animation = 'slideUp 0.3s ease reverse';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
-async function startQuizSession() {
-    const response = await fetch(`${API_BASE}/review/quiz`);
-    const result = await response.json();
-    
-    if (!result.success || !result.quiz || result.quiz.length === 0) {
-        // Shows empty state
-        return;
+    // Enter key on input
+    const wordInput = document.getElementById('word-input');
+    if (wordInput) {
+        wordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addWord();
+        });
     }
-    // Start quiz...
-}
+
+    // Load initial data
+    loadWords();
+
+    // Switch to default tab
+    switchTab('words');
+});

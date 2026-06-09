@@ -1,6 +1,6 @@
 """
 Review and Quiz API endpoints.
-Handles: daily reviews, quiz sessions, review submission.
+Handles: daily reviews, quiz sessions, review submission, force review.
 """
 
 from typing import Optional, List
@@ -10,9 +10,9 @@ from pydantic import BaseModel
 from backend.database.connection import get_db
 from backend.database.models import Word, Review
 from backend.agents.review_quiz import review_quiz_agent
+from datetime import datetime
 
 router = APIRouter(prefix="/review", tags=["Review & Quiz"])
-
 
 # Pydantic schemas
 class ReviewSubmit(BaseModel):
@@ -26,13 +26,51 @@ class QuizAnswer(BaseModel):
     correct_index: int
     user_id: Optional[int] = None
 
-
 @router.get("/due")
 async def get_due_words(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     """Get all words due for review today."""
     result = review_quiz_agent.run(action="get_due", user_id=user_id)
     return result
 
+# ========== NEW: Force Review Endpoint ==========
+@router.get("/word/{word_id}")
+async def get_word_for_review(word_id: int, db: Session = Depends(get_db)):
+    """
+    Get a specific word for review, regardless of due status.
+    Used when user clicks "Review" on a word card.
+    """
+    word = db.query(Word).filter(Word.id == word_id).first()
+    if not word:
+        raise HTTPException(status_code=404, detail="Word not found")
+
+    # Get or create review record
+    review = db.query(Review).filter(Review.word_id == word_id).first()
+    if not review:
+        # Create review record if missing
+        review = Review(
+            word_id=word_id,
+            interval=1,
+            ease_factor=2.5,
+            repetitions=0,
+            is_due=True,
+            next_review_date=None
+        )
+        db.add(review)
+        db.commit()
+
+    return {
+        "success": True,
+        "word_id": word.id,
+        "word": word.word,
+        "phonetic": word.phonetic,
+        "chinese_meaning": word.chinese_meaning,
+        "example_sentence": word.example_sentence,
+        "chinese_translation": word.chinese_translation,
+        "is_due": review.is_due,
+        "repetitions": review.repetitions,
+        "interval": review.interval,
+        "message": "Review this word now!"
+    }
 
 @router.post("/submit")
 async def submit_review(data: ReviewSubmit, db: Session = Depends(get_db)):
@@ -55,7 +93,6 @@ async def submit_review(data: ReviewSubmit, db: Session = Depends(get_db)):
 
     return result
 
-
 @router.get("/quiz")
 async def get_quiz(user_id: Optional[int] = None, num_questions: int = 5):
     """Generate a quiz with multiple choice questions."""
@@ -64,7 +101,6 @@ async def get_quiz(user_id: Optional[int] = None, num_questions: int = 5):
         user_id=user_id
     )
     return result
-
 
 @router.post("/quiz/answer")
 async def submit_quiz_answer(data: QuizAnswer, db: Session = Depends(get_db)):
@@ -92,7 +128,6 @@ async def submit_quiz_answer(data: QuizAnswer, db: Session = Depends(get_db)):
         "review_result": result
     }
 
-
 @router.get("/word/{word_id}/history")
 async def get_word_review_history(word_id: int, db: Session = Depends(get_db)):
     """Get review history for a specific word."""
@@ -112,7 +147,6 @@ async def get_word_review_history(word_id: int, db: Session = Depends(get_db)):
             for r in reviews
         ]
     }
-
 
 @router.post("/reset/{word_id}")
 async def reset_word_progress(word_id: int, db: Session = Depends(get_db)):

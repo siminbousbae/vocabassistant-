@@ -12,6 +12,11 @@ from dashscope import Generation
 from backend.config import settings
 
 
+import os
+# Remove proxy for DashScope (Alibaba Cloud) - works better direct from China
+for key in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
+    os.environ.pop(key, None)
+
 class QwenClient:
     """Client for Qwen LLM via DashScope API."""
 

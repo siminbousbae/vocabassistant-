@@ -30,7 +30,6 @@ from backend.agents.review_quiz import review_quiz_agent
 from backend.database.connection import get_db_session
 from backend.database.models import Word, Review
 
-
 # ============== KEYBOARD LAYOUTS ==============
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
@@ -51,14 +50,12 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
-
 def get_add_word_keyboard() -> InlineKeyboardMarkup:
     """Keyboard for add word flow."""
     keyboard = [
         [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_main")]
     ]
     return InlineKeyboardMarkup(keyboard)
-
 
 def get_review_keyboard(word_id: int) -> InlineKeyboardMarkup:
     """SM-2 quality rating keyboard."""
@@ -78,7 +75,6 @@ def get_review_keyboard(word_id: int) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
-
 def get_quiz_keyboard(word_id: int, options: list, correct_index: int) -> InlineKeyboardMarkup:
     """Quiz multiple choice keyboard."""
     keyboard = []
@@ -91,7 +87,6 @@ def get_quiz_keyboard(word_id: int, options: list, correct_index: int) -> Inline
     keyboard.append([InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_main")])
     return InlineKeyboardMarkup(keyboard)
 
-
 def get_stats_keyboard() -> InlineKeyboardMarkup:
     """Stats view keyboard."""
     keyboard = [
@@ -101,7 +96,6 @@ def get_stats_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_main")]
     ]
     return InlineKeyboardMarkup(keyboard)
-
 
 def get_words_list_keyboard(words: list, page: int = 0) -> InlineKeyboardMarkup:
     """Paginated word list keyboard."""
@@ -129,7 +123,6 @@ def get_words_list_keyboard(words: list, page: int = 0) -> InlineKeyboardMarkup:
     keyboard.append([InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_main")])
     return InlineKeyboardMarkup(keyboard)
 
-
 def get_word_detail_keyboard(word_id: int) -> InlineKeyboardMarkup:
     """Word detail action keyboard."""
     keyboard = [
@@ -140,11 +133,34 @@ def get_word_detail_keyboard(word_id: int) -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(keyboard)
 
+# ============== AUDIO MESSAGE TRACKING ==============
+
+async def _delete_audio_messages(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    """Delete any tracked audio messages for this chat."""
+    audio_message_ids = context.chat_data.get("audio_message_ids", [])
+    for msg_id in audio_message_ids:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except Exception as e:
+            # Message may already be deleted or too old
+            print(f"Could not delete audio message {msg_id}: {e}")
+    # Clear the list
+    context.chat_data["audio_message_ids"] = []
+
+async def _track_audio_message(context: ContextTypes.DEFAULT_TYPE, message_id: int):
+    """Track an audio message ID so we can delete it later."""
+    if "audio_message_ids" not in context.chat_data:
+        context.chat_data["audio_message_ids"] = []
+    context.chat_data["audio_message_ids"].append(message_id)
 
 # ============== MESSAGE HANDLERS ==============
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command - shows main menu."""
+    # Clean up any lingering audio messages when starting fresh
+    if update.effective_chat:
+        await _delete_audio_messages(context, update.effective_chat.id)
+
     welcome_text = (
         "🎓 *Welcome to AI Vocabulary Assistant!*\n\n"
         "I help you learn English words with *real examples* from news sources like "
@@ -154,10 +170,9 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         welcome_text,
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=get_main_menu_keyboard()
     )
-
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -184,7 +199,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Default: treat as word to add with search
         await add_word_flow(update, context, text)
 
-
 # ============== CALLBACK HANDLERS ==============
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -194,22 +208,28 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
     chat_id = query.message.chat_id
-    message_id = query.message.message_id
 
     # Main menu actions
     if data == "menu_main":
+        await _delete_audio_messages(context, chat_id)
         await show_main_menu(query, context)
     elif data == "menu_add":
+        await _delete_audio_messages(context, chat_id)
         await show_add_options(query, context)
     elif data == "menu_words":
+        await _delete_audio_messages(context, chat_id)
         await show_words_list(query, context, page=0)
     elif data == "menu_review":
+        await _delete_audio_messages(context, chat_id)
         await start_review_session(query, context)
     elif data == "menu_quiz":
+        await _delete_audio_messages(context, chat_id)
         await start_quiz_session(query, context)
     elif data == "menu_stats":
+        await _delete_audio_messages(context, chat_id)
         await show_stats_menu(query, context)
     elif data == "menu_help":
+        await _delete_audio_messages(context, chat_id)
         await show_help(query, context)
 
     # Add word flow
@@ -231,6 +251,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Review
     elif data.startswith("review_start_"):
         word_id = int(data.split("_")[-1])
+        await _delete_audio_messages(context, chat_id)
         await show_word_for_review(query, context, word_id)
     elif data.startswith("review_") and "_skip" not in data:
         parts = data.split("_")
@@ -270,7 +291,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "stats_streak":
         await show_streak(query, context)
 
-
 # ============== FLOW IMPLEMENTATIONS ==============
 
 async def show_main_menu(query, context):
@@ -281,24 +301,21 @@ async def show_main_menu(query, context):
     )
     await query.edit_message_text(
         text,
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=get_main_menu_keyboard()
     )
-
 
 async def show_add_options(query, context):
     """Show add word options."""
     text = (
         "➕ *Add a New Word*\n\n"
-
         "🔍 *Search Real Examples* - Find authentic sentences from Reuters, BBC, etc.\n"
     )
     await query.edit_message_text(
         text,
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=get_add_word_keyboard()
     )
-
 
 async def prompt_for_word(query, context, mode: str):
     """Prompt user to enter a word."""
@@ -312,12 +329,9 @@ async def prompt_for_word(query, context, mode: str):
     )
     await query.edit_message_text(
         text,
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("⬅️ Cancel", callback_data="menu_main")
-        ]])
+        parse_mode=None,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Cancel", callback_data="menu_main")]])
     )
-
 
 async def add_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, word: str):
     """Execute add word flow with agent."""
@@ -327,16 +341,12 @@ async def add_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, word
     processing_msg = await update.message.reply_text(
         f"🔍 Searching for real examples of '*{word}*'...\n"
         f"⏳ This may take 10-20 seconds...",
-        parse_mode="Markdown"
+        parse_mode=None
     )
 
     try:
         # Run Example Search Agent
         result = example_search_agent.run(word=word)
-        
-        # DEBUG
-        # print(f"DEBUG: result type = {type(result)}")
-        # print(f"DEBUG: result = {result}")
 
         # Check for actual success (success=True AND word is a dict)
         if not result.get("success") or isinstance(result.get("word"), str):
@@ -344,7 +354,7 @@ async def add_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, word
             await processing_msg.edit_text(
                 f"❌ *Error:* {error_msg}\n\n"
                 f"Try another word or check your API keys.",
-                parse_mode="Markdown",
+                parse_mode=None,
                 reply_markup=get_main_menu_keyboard()
             )
             return
@@ -375,7 +385,7 @@ async def add_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, word
 
         await processing_msg.edit_text(
             response,
-            parse_mode="Markdown",
+            parse_mode=None,
             reply_markup=get_main_menu_keyboard(),
             disable_web_page_preview=True
         )
@@ -385,10 +395,9 @@ async def add_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, word
         traceback.print_exc()
         await processing_msg.edit_text(
             f"❌ *Error:* {str(e)}\n\nPlease try again.",
-            parse_mode="Markdown",
+            parse_mode=None,
             reply_markup=get_main_menu_keyboard()
         )
-
 
 async def search_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, word: str):
     """Search for existing word in database."""
@@ -400,7 +409,7 @@ async def search_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, w
             await update.message.reply_text(
                 f"❌ Word '*{word}*' not found in your vocabulary.\n\n"
                 f"Would you like to add it?",
-                parse_mode="Markdown",
+                parse_mode=None,
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("➕ Add This Word", callback_data="menu_add")],
                     [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_main")]
@@ -421,14 +430,13 @@ async def search_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, w
 
         await update.message.reply_text(
             response,
-            parse_mode="Markdown",
+            parse_mode=None,
             reply_markup=get_word_detail_keyboard(db_word.id),
             disable_web_page_preview=True
         )
 
     finally:
         db.close()
-
 
 async def show_words_list(query, context, page: int = 0):
     """Show paginated list of user's words."""
@@ -440,7 +448,7 @@ async def show_words_list(query, context, page: int = 0):
             await query.edit_message_text(
                 "📭 *Your vocabulary is empty!*\n\n"
                 "Start by adding your first word.",
-                parse_mode="Markdown",
+                parse_mode=None,
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("➕ Add Word", callback_data="menu_add")],
                     [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_main")]
@@ -467,13 +475,12 @@ async def show_words_list(query, context, page: int = 0):
 
         await query.edit_message_text(
             text,
-            parse_mode="Markdown",
+            parse_mode=None,
             reply_markup=get_words_list_keyboard(word_list, page)
         )
 
     finally:
         db.close()
-
 
 async def show_word_detail(query, context, word_id: int):
     """Show detailed view of a word."""
@@ -506,14 +513,13 @@ async def show_word_detail(query, context, word_id: int):
 
         await query.edit_message_text(
             text,
-            parse_mode="Markdown",
+            parse_mode=None,
             reply_markup=get_word_detail_keyboard(word_id),
             disable_web_page_preview=True
         )
 
     finally:
         db.close()
-
 
 async def start_review_session(query, context):
     """Start review session with due words."""
@@ -523,7 +529,7 @@ async def start_review_session(query, context):
         await query.edit_message_text(
             "🎉 *No words due for review!*\n\n"
             "You've completed all your reviews. Great job! 🌟",
-            parse_mode="Markdown",
+            parse_mode=None,
             reply_markup=get_main_menu_keyboard()
         )
         return
@@ -533,8 +539,46 @@ async def start_review_session(query, context):
     context.user_data["review_index"] = 0
 
     await show_next_review_word(query, context)
-
-
+async def show_word_for_review(query, context, word_id: int):
+    """Show a specific word for review (from word detail 'Review Now' button)."""
+    db = get_db_session()
+    try:
+        word = db.query(Word).filter(Word.id == word_id).first()
+        if not word:
+            await query.edit_message_text(
+                "❌ Word not found.",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+        
+        # Get or create review record
+        review = db.query(Review).filter(Review.word_id == word_id).first()
+        if not review:
+            review = Review(
+                word_id=word_id,
+                interval=1,
+                ease_factor=2.5,
+                repetitions=0,
+                is_due=True,
+                next_review_date=None
+            )
+            db.add(review)
+            db.commit()
+        
+        # Set up single-word review queue
+        context.user_data["review_queue"] = [{
+            "word_id": word.id,
+            "word": word.word,
+            "chinese_meaning": word.chinese_meaning or "",
+            "example_sentence": word.example_sentence or ""
+        }]
+        context.user_data["review_index"] = 0
+        
+        # Show the word for review
+        await show_next_review_word(query, context)
+        
+    finally:
+        db.close()
 async def show_next_review_word(query, context):
     """Show the next word in review queue."""
     queue = context.user_data.get("review_queue", [])
@@ -546,7 +590,7 @@ async def show_next_review_word(query, context):
             f"🎉 *Review Complete!*\n\n"
             f"You reviewed {len(queue)} words today.\n"
             f"Keep up the great work! 🌟",
-            parse_mode="Markdown",
+            parse_mode=None,
             reply_markup=get_main_menu_keyboard()
         )
         context.user_data["review_queue"] = []
@@ -565,10 +609,9 @@ async def show_next_review_word(query, context):
 
     await query.edit_message_text(
         text,
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=get_review_keyboard(word["word_id"])
     )
-
 
 async def submit_review(query, context, word_id: int, quality: int):
     """Submit review quality and show next word."""
@@ -588,18 +631,16 @@ async def submit_review(query, context, word_id: int, quality: int):
         f"{emoji} *Rated {quality}/5*\n\n"
         f"{result.get('message', 'Review saved!')}\n\n"
         f"Loading next word...",
-        parse_mode="Markdown"
+        parse_mode=None
     )
 
     await asyncio.sleep(1)
     await show_next_review_word(query, context)
 
-
 async def skip_review(query, context, word_id: int):
     """Skip current review word."""
     context.user_data["review_index"] = context.user_data.get("review_index", 0) + 1
     await show_next_review_word(query, context)
-
 
 async def start_quiz_session(query, context):
     """Start quiz session."""
@@ -609,7 +650,7 @@ async def start_quiz_session(query, context):
         await query.edit_message_text(
             "🎯 *No quiz available!*\n\n"
             "Add some words first to generate quizzes.",
-            parse_mode="Markdown",
+            parse_mode=None,
             reply_markup=get_main_menu_keyboard()
         )
         return
@@ -620,7 +661,6 @@ async def start_quiz_session(query, context):
     context.user_data["quiz_score"] = 0
 
     await show_next_quiz_question(query, context)
-
 
 async def show_next_quiz_question(query, context):
     """Show next quiz question."""
@@ -638,7 +678,7 @@ async def show_next_quiz_question(query, context):
             f"Score: {score}/{total} ({percentage}%)\n\n"
             f"{'🌟 Excellent!' if percentage >= 80 else '👍 Good job!' if percentage >= 60 else '💪 Keep practicing!'}\n\n"
             f"Review the words you missed to improve!",
-            parse_mode="Markdown",
+            parse_mode=None,
             reply_markup=get_main_menu_keyboard()
         )
         context.user_data["quiz_queue"] = []
@@ -654,14 +694,13 @@ async def show_next_quiz_question(query, context):
 
     await query.edit_message_text(
         text,
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=get_quiz_keyboard(
             question["word_id"],
             question["options"],
             question["correct_index"]
         )
     )
-
 
 async def handle_quiz_answer(query, context, word_id: int, selected: int, correct: int):
     """Handle quiz answer selection."""
@@ -687,7 +726,7 @@ async def handle_quiz_answer(query, context, word_id: int, selected: int, correc
 
     await query.edit_message_text(
         text,
-        parse_mode="Markdown"
+        parse_mode=None
     )
 
     # Update review based on correctness
@@ -698,7 +737,6 @@ async def handle_quiz_answer(query, context, word_id: int, selected: int, correc
     context.user_data["quiz_index"] = index + 1
     await show_next_quiz_question(query, context)
 
-
 async def show_stats_menu(query, context):
     """Show statistics menu."""
     text = (
@@ -707,10 +745,9 @@ async def show_stats_menu(query, context):
     )
     await query.edit_message_text(
         text,
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=get_stats_keyboard()
     )
-
 
 async def show_stats_overview(query, context):
     """Show overview statistics."""
@@ -739,10 +776,9 @@ async def show_stats_overview(query, context):
 
     await query.edit_message_text(
         text,
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=get_stats_keyboard()
     )
-
 
 async def show_daily_stats(query, context):
     """Show daily progress chart (text-based)."""
@@ -754,10 +790,9 @@ async def show_daily_stats(query, context):
     )
     await query.edit_message_text(
         text,
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=get_stats_keyboard()
     )
-
 
 async def show_streak(query, context):
     """Show streak information."""
@@ -772,10 +807,9 @@ async def show_streak(query, context):
 
     await query.edit_message_text(
         text,
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=get_stats_keyboard()
     )
-
 
 async def send_audio(query, context, word_id: int):
     """Send TTS audio for a word as Telegram voice message."""
@@ -791,37 +825,39 @@ async def send_audio(query, context, word_id: int):
             from gtts import gTTS
             import tempfile
             import os
-            
+
             # Create temporary MP3 file
             text_to_speak = f"{word.word}. {word.example_sentence or ''}"
             tts = gTTS(text=text_to_speak, lang='en', slow=False)
-            
+
             with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as fp:
                 tts.save(fp.name)
                 audio_path = fp.name
-            
+
             # Send as voice message to Telegram
-            await context.bot.send_voice(
+            sent_message = await context.bot.send_voice(
                 chat_id=query.message.chat_id,
                 voice=open(audio_path, 'rb'),
                 caption=f"🔊 {word.word.upper()} — [{word.phonetic or 'N/A'}]"
             )
-            
+
+            # TRACK the audio message ID so we can delete it later
+            await _track_audio_message(context, sent_message.message_id)
+
             # Cleanup temp file
             os.remove(audio_path)
-            
+
             # Answer the callback query
             await query.answer("Audio sent!")
-            
+
         except ImportError:
             await query.answer("TTS not installed. Run: pip install gtts")
-            
-    except Exception as e:
-        print(f"Audio error: {e}")
-        await query.answer("Failed to generate audio")
+
+        except Exception as e:
+            print(f"Audio error: {e}")
+            await query.answer("Failed to generate audio")
     finally:
         db.close()
-
 
 async def confirm_delete(query, context, word_id: int):
     """Show delete confirmation."""
@@ -834,10 +870,9 @@ async def confirm_delete(query, context, word_id: int):
         "🗑️ *Delete Word?*\n\n"
         "Are you sure you want to delete this word?\n"
         "This action cannot be undone.",
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
 
 async def delete_word(query, context, word_id: int):
     """Delete word from database."""
@@ -852,7 +887,7 @@ async def delete_word(query, context, word_id: int):
             await query.edit_message_text(
                 f"✅ *Deleted:* {word_name}\n\n"
                 f"Word removed from your vocabulary.",
-                parse_mode="Markdown",
+                parse_mode=None,
                 reply_markup=get_main_menu_keyboard()
             )
         else:
@@ -862,7 +897,6 @@ async def delete_word(query, context, word_id: int):
             )
     finally:
         db.close()
-
 
 async def show_help(query, context):
     """Show help information."""
@@ -886,10 +920,9 @@ async def show_help(query, context):
 
     await query.edit_message_text(
         text,
-        parse_mode="Markdown",
+        parse_mode=None,
         reply_markup=get_main_menu_keyboard()
     )
-
 
 # ============== WEBHOOK HANDLER ==============
 
@@ -899,7 +932,6 @@ async def handle_update(update_data: dict):
     await application.initialize()
     update = Update.de_json(update_data, application.bot)
     await application.process_update(update)
-
 
 # ============== BOT INITIALIZATION ==============
 
@@ -918,13 +950,12 @@ def create_bot_application() -> Application:
 
     return application
 
-
 async def start_bot():
     """Start the bot with polling."""
     application = create_bot_application()
 
     print("🤖 Telegram Bot starting...")
-    print("   Use /start to see the main menu with buttons!")
+    print(" Use /start to see the main menu with buttons!")
 
     await application.initialize()
     await application.start()
@@ -936,7 +967,6 @@ async def start_bot():
             await asyncio.sleep(1)
     except KeyboardInterrupt:
         await application.stop()
-
 
 if __name__ == "__main__":
     asyncio.run(start_bot())

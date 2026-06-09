@@ -201,40 +201,41 @@ class ReviewQuizAgent(BaseAgent):
             db.close()
 
     def _generate_quiz(self, user_id: Optional[int] = None,
-                       num_questions: int = 5) -> Dict[str, Any]:
-        """Generate quiz questions for due words."""
+                         num_questions: int = 5) -> Dict[str, Any]:
+        """Generate quiz questions from ALL words (not just due ones)."""
         db = get_db_session()
         try:
-            # Get due words
-            due_result = self._get_due_words(user_id, limit=num_questions)
-            due_words = due_result.get("due_words", [])
+            # FIX: Get ALL words, not just due words!
+            words = db.query(Word).limit(num_questions * 2).all()
 
-            if not due_words:
+            if not words:
                 return {
                     "success": True,
                     "quiz": [],
-                    "message": "No words due for quiz! Great job!"
+                    "message": "Add some words first to generate quizzes."
                 }
 
-            questions = []
-            for word_data in due_words:
-                try:
-                    # Generate quiz question using Qwen
-                    quiz = qwen_client.generate_quiz_question(
-                        word_data["word"],
-                        word_data["chinese_meaning"]
-                    )
+            # Shuffle and pick random words
+            random.shuffle(words)
+            selected_words = words[:num_questions]
 
+            questions = []
+            for word in selected_words:
+                try:
+                    quiz = qwen_client.generate_quiz_question(
+                        word.word,
+                        word.chinese_meaning or ""
+                    )
                     questions.append({
-                        "word_id": word_data["word_id"],
-                        "word": word_data["word"],
+                        "word_id": word.id,
+                        "word": word.word,
                         "question": quiz["question"],
                         "options": quiz["options"],
                         "correct_index": quiz["correct_index"],
                         "explanation": quiz["explanation"]
                     })
                 except Exception as e:
-                    print(f"Failed to generate quiz for {word_data['word']}: {e}")
+                    print(f"Failed to generate quiz for {word.word}: {e}")
                     continue
 
             return {
