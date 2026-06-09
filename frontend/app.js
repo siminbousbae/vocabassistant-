@@ -14,6 +14,7 @@ let quizIndex = 0;
 let quizScore = 0;
 let currentQuizQuestion = null;
 let currentTab = 'learn';  // ← matches HTML data-tab="learn"
+let currentFilter = 'all'; // 'all', 'due', 'learned'
 
 // DOM Elements - MATCHING HTML IDs
 const tabs = {
@@ -122,21 +123,41 @@ function updateHeaderStats() {
 function renderWords() {
     const container = document.getElementById('words-grid');
     const emptyState = document.getElementById('empty-words');
-
+    
     if (!container) {
         console.error('ERROR: words-grid container not found!');
         return;
     }
 
-    if (words.length === 0) {
-        container.innerHTML = '';
-        if (emptyState) emptyState.classList.remove('hidden');
-        return;
+    // Filter words based on current filter
+    let filteredWords = words;
+    if (currentFilter === 'due') {
+        filteredWords = words.filter(w => w.is_due);
+    } else if (currentFilter === 'learned') {
+        filteredWords = words.filter(w => w.learned);
     }
 
+    if (filteredWords.length === 0) {
+        container.innerHTML = '';
+        if (emptyState) {
+            emptyState.classList.remove('hidden');
+            const emptyMsg = emptyState.querySelector('p');
+            if (emptyMsg) {
+                if (currentFilter === 'due') {
+                    emptyMsg.textContent = 'No words due for review. Great job!';
+                } else if (currentFilter === 'learned') {
+                    emptyMsg.textContent = 'No learned words yet. Keep reviewing!';
+                } else {
+                    emptyMsg.textContent = 'No words yet. Add your first word above!';
+                }
+            }
+        }
+        return;
+    }
+    
     if (emptyState) emptyState.classList.add('hidden');
 
-    container.innerHTML = words.map(word => `
+    container.innerHTML = filteredWords.map(word => `
         <div class="word-card ${word.learned ? 'learned' : ''} ${word.is_due ? 'due' : ''}" data-word-id="${word.id}">
             <div class="word-header">
                 <div>
@@ -163,7 +184,6 @@ function renderWords() {
         </div>
     `).join('');
 
-    // Attach event listeners
     attachWordCardListeners();
 }
 
@@ -196,6 +216,21 @@ function attachWordCardListeners() {
     });
 }
 
+
+function setupFilterButtons() {
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            // Remove active from all filter buttons
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            // Add active to clicked button
+            e.target.classList.add('active');
+            // Update filter
+            currentFilter = e.target.dataset.filter;
+            // Re-render words
+            renderWords();
+        });
+    });
+}
 // ========================================
 // REVIEW
 // ========================================
@@ -759,6 +794,28 @@ document.addEventListener('DOMContentLoaded', () => {
             submitReview(quality);
         });
     });
+
+        // Add filter button handlers
+    const filterAll = document.getElementById('filter-all');
+    const filterDue = document.getElementById('filter-due');
+    const filterLearned = document.getElementById('filter-learned');
+    
+    [filterAll, filterDue, filterLearned].forEach(btn => {
+        if (btn) {
+            btn.addEventListener('click', (e) => {
+                // Remove active from all
+                [filterAll, filterDue, filterLearned].forEach(b => b?.classList.remove('active'));
+                // Add active to clicked
+                e.target.classList.add('active');
+                // Update filter
+                currentFilter = e.target.id.replace('filter-', '');
+                // Re-render
+                renderWords();
+            });
+        }
+    });
+
+    setupFilterButtons();
 
     // Load initial data
     loadWords();
