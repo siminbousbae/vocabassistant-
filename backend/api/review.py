@@ -34,7 +34,7 @@ async def get_due_words(user_id: Optional[int] = None, db: Session = Depends(get
 
 # ========== NEW: Force Review Endpoint ==========
 @router.get("/word/{word_id}")
-@router.get("/word/{word_id}")
+
 async def get_word_for_review(word_id: int, db: Session = Depends(get_db)):
     """Get a specific word for review, regardless of due status."""
     word = db.query(Word).filter(Word.id == word_id).first()

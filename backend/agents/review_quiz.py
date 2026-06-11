@@ -61,21 +61,28 @@ class ReviewQuizAgent(BaseAgent):
         try:
             now = datetime.now()
 
-            query = db.query(Word, Review).join(Review, Word.id == Review.word_id)
+            # FIX: Use outerjoin so words without reviews (new words) are included
+            query = db.query(Word, Review).outerjoin(Review, Word.id == Review.word_id)
 
-            # Build filters properly
-            filters = [Review.is_due == True]
+            # FIX: A word is due if:
+            # 1. It has no review record yet (Review.id is None), OR
+            # 2. It has a review that is explicitly marked due with next_review_date <= now
+            filters = [
+                or_(
+                    Review.id == None,
+                    and_(
+                        Review.is_due == True,
+                        or_(
+                            Review.next_review_date == None,
+                            Review.next_review_date <= now
+                        )
+                    )
+                )
+            ]
 
-            # Due date filter
-            due_filter = or_(
-                Review.next_review_date == None,
-                Review.next_review_date <= now
-            )
-            filters.append(due_filter)
-
-            # Apply user filter only if provided
+            # FIX: Filter by user_id on Word, because Review might be NULL
             if user_id is not None:
-                filters.append(Review.user_id == user_id)
+                filters.append(Word.user_id == user_id)
 
             results = query.filter(and_(*filters)).limit(limit).all()
 
@@ -88,9 +95,9 @@ class ReviewQuizAgent(BaseAgent):
                     "chinese_meaning": word.chinese_meaning,
                     "example_sentence": word.example_sentence,
                     "chinese_translation": word.chinese_translation,
-                    "repetitions": review.repetitions,
-                    "interval": review.interval,
-                    "ease_factor": review.ease_factor
+                    "repetitions": review.repetitions if review else 0,
+                    "interval": review.interval if review else 1,
+                    "ease_factor": review.ease_factor if review else 2.5
                 })
 
             return {
