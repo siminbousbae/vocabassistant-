@@ -7,15 +7,15 @@ import os
 from pathlib import Path
 from datetime import datetime
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+
 # Add project root to path
 project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
-
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
 
 from backend.config import settings
 from backend.database.connection import init_db
@@ -60,12 +60,7 @@ async def health_check():
 
 @app.get("/")
 async def root():
-    return {
-        "app": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "docs": "/docs",
-        "app_url": "/app"
-    }
+    return RedirectResponse(url="/app")
 
 # Serve frontend
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
