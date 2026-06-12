@@ -79,10 +79,23 @@
 
                 <div class="section-header">
                     <h2><i class="fas fa-layer-group"></i> Your Collection</h2>
-                    <div class="filters">
-                        <button class="filter-btn active" id="filter-all" data-filter="all">All</button>
-                        <button class="filter-btn" id="filter-due" data-filter="due">Due</button>
-                        <button class="filter-btn" id="filter-learned" data-filter="learned">Learned</button>
+                    <div class="collection-tools">
+                        <div class="filters">
+                            <button class="filter-btn active" id="filter-all" data-filter="all">All</button>
+                            <button class="filter-btn" id="filter-due" data-filter="due">Due</button>
+                            <button class="filter-btn" id="filter-learned" data-filter="learned">Learned</button>
+                        </div>
+                        <div class="collection-search">
+                            <i class="fas fa-search"></i>
+                            <input type="search" id="collection-search" placeholder="Search words..." autocomplete="off">
+                        </div>
+                        <div class="collection-date-filter">
+                            <i class="fas fa-calendar-day"></i>
+                            <input type="date" id="added-date-filter" aria-label="Filter words by added date">
+                            <button id="clear-date-filter" title="Clear date filter" aria-label="Clear date filter">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -184,6 +197,19 @@
 
             <!-- Stats Tab -->
             <div id="tab-stats" class="tab-content">
+                <div class="stats-hero">
+                    <div>
+                        <h2><i class="fas fa-chart-line"></i> Learning Analytics</h2>
+                        <p>Track vocabulary growth, review consistency, and mastery over time.</p>
+                    </div>
+                    <div class="stats-periods">
+                        <button class="stats-period active" data-period="day">Day</button>
+                        <button class="stats-period" data-period="week">Week</button>
+                        <button class="stats-period" data-period="month">Month</button>
+                        <button class="stats-period" data-period="year">Year</button>
+                    </div>
+                </div>
+
                 <div class="stats-grid">
                     <div class="stat-card">
                         <div class="stat-icon blue"><i class="fas fa-book"></i></div>
@@ -203,7 +229,7 @@
                         <div class="stat-icon orange"><i class="fas fa-redo"></i></div>
                         <div class="stat-info">
                             <div class="stat-value" id="stat-reviewed">0</div>
-                            <div class="stat-label">Reviews</div>
+                            <div class="stat-label">Reviews This Week</div>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -215,18 +241,71 @@
                     </div>
                 </div>
 
-                <div class="stats-chart">
-                    <h3><i class="fas fa-calendar-week"></i> Weekly Activity</h3>
-                    <div class="chart-container" id="weekly-chart">
-                        <!-- Bars injected by JS -->
-                    </div>
-                </div>
+                <div class="stats-layout">
+                    <section class="stats-panel stats-panel-wide">
+                        <div class="stats-panel-head">
+                            <div>
+                                <h3 id="activity-title"><i class="fas fa-calendar-week"></i> Weekly Activity</h3>
+                                <p id="activity-subtitle">Reviews, new words, and learned words by week.</p>
+                            </div>
+                            <div class="period-total">
+                                <span id="period-total-value">0</span>
+                                <small>reviews</small>
+                            </div>
+                        </div>
+                        <div class="activity-chart" id="activity-chart"></div>
+                    </section>
 
-                <div class="stats-mastery">
-                    <h3>Your Mastery Level</h3>
-                    <div class="mastery-badge" id="mastery-text">
-                        <i class="fas fa-crown"></i> Novice
-                    </div>
+                    <section class="stats-panel">
+                        <div class="stats-panel-head">
+                            <div>
+                                <h3><i class="fas fa-list-check"></i> Period Detail</h3>
+                                <p id="period-label">Selected range</p>
+                            </div>
+                        </div>
+                        <div class="period-detail-grid">
+                            <div>
+                                <span id="period-added">0</span>
+                                <small>Added</small>
+                            </div>
+                            <div>
+                                <span id="period-reviewed">0</span>
+                                <small>Reviewed</small>
+                            </div>
+                            <div>
+                                <span id="period-learned">0</span>
+                                <small>Learned</small>
+                            </div>
+                            <div>
+                                <span id="period-active-days">0</span>
+                                <small>Active Days</small>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="stats-panel">
+                        <div class="stats-panel-head">
+                            <div>
+                                <h3><i class="fas fa-crown"></i> Mastery</h3>
+                                <p>Your current vocabulary level.</p>
+                            </div>
+                        </div>
+                        <div class="mastery-badge" id="mastery-text">Novice</div>
+                        <div class="mastery-progress">
+                            <div class="mastery-progress-fill" id="mastery-progress-fill"></div>
+                        </div>
+                        <div class="mastery-caption" id="mastery-caption">0% learned</div>
+                    </section>
+
+                    <section class="stats-panel">
+                        <div class="stats-panel-head">
+                            <div>
+                                <h3><i class="fas fa-layer-group"></i> Difficulty</h3>
+                                <p>Words grouped by difficulty level.</p>
+                            </div>
+                        </div>
+                        <div class="difficulty-chart" id="difficulty-chart"></div>
+                    </section>
                 </div>
             </div>
         </main>

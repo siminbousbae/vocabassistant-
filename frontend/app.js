@@ -15,6 +15,10 @@ let quizScore = 0;
 let currentQuizQuestion = null;
 let currentTab = 'learn';
 let currentFilter = 'all';
+let wordSearchQuery = '';
+let addedDateFilter = '';
+let statsPeriod = 'day';
+let latestStatsPayload = null;
 
 // DOM Elements
 const tabs = {
@@ -132,13 +136,37 @@ function renderWords() {
         filteredWords = words.filter(w => w.learned);
     }
 
+    if (wordSearchQuery) {
+        const query = wordSearchQuery.toLowerCase();
+        filteredWords = filteredWords.filter(word => {
+            return [
+                word.word,
+                word.phonetic,
+                word.part_of_speech,
+                word.chinese_meaning,
+                word.example_sentence,
+                word.source_name
+            ].some(value => (value || '').toLowerCase().includes(query));
+        });
+    }
+
+    if (addedDateFilter) {
+        filteredWords = filteredWords.filter(word => {
+            return (word.created_at || '').slice(0, 10) === addedDateFilter;
+        });
+    }
+
     if (filteredWords.length === 0) {
         container.innerHTML = '';
         if (emptyState) {
             emptyState.classList.remove('hidden');
             const emptyMsg = emptyState.querySelector('p');
             if (emptyMsg) {
-                if (currentFilter === 'due') {
+                if (addedDateFilter) {
+                    emptyMsg.textContent = `No words added on ${addedDateFilter}.`;
+                } else if (wordSearchQuery) {
+                    emptyMsg.textContent = `No words found for "${wordSearchQuery}".`;
+                } else if (currentFilter === 'due') {
                     emptyMsg.textContent = 'No words due for review. Great job!';
                 } else if (currentFilter === 'learned') {
                     emptyMsg.textContent = 'No learned words yet. Keep reviewing!';
@@ -165,7 +193,18 @@ function renderWords() {
             ${word.example_sentence ? `
                 <div class="word-example">${word.example_sentence}</div>
             ` : ''}
+            ${word.source_url ? `
+                <div class="word-source">
+                    <i class="fas fa-link"></i>
+                    <a href="${word.source_url}" target="_blank" rel="noopener noreferrer">
+                        ${word.source_name || 'Open source'}
+                    </a>
+                </div>
+            ` : ''}
             <div class="word-actions">
+                <button class="btn-audio-word" data-word-id="${word.id}" title="Play pronunciation" aria-label="Play pronunciation for ${word.word}">
+                    <i class="fas fa-volume-up"></i> Listen
+                </button>
                 <button class="btn-review-word" data-word-id="${word.id}">
                     <i class="fas fa-brain"></i> Review
                 </button>
@@ -183,6 +222,15 @@ function renderWords() {
 }
 
 function attachWordCardListeners() {
+    document.querySelectorAll('.btn-audio-word').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const wordId = parseInt(btn.dataset.wordId);
+            const word = words.find(w => w.id === wordId);
+            if (word) speakEnglish(word.word);
+        });
+    });
+
     document.querySelectorAll('.btn-review-word').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -537,7 +585,11 @@ function showWordDetail(wordId) {
                 <p class="word-example">${word.example_sentence || 'N/A'}</p>
                 <p>${word.chinese_translation || ''}</p>
                 <hr>
-                <p><strong>Source:</strong> ${word.source_name || 'N/A'}</p>
+                <p><strong>Source:</strong> ${
+                    word.source_url
+                        ? `<a href="${word.source_url}" target="_blank" rel="noopener noreferrer">${word.source_name || word.source_url}</a>`
+                        : (word.source_name || 'N/A')
+                }</p>
                 ${word.collocations ? `<p><strong>Collocations:</strong> ${word.collocations.join(', ')}</p>` : ''}
                 ${word.synonyms ? `<p><strong>Synonyms:</strong> ${word.synonyms.join(', ')}</p>` : ''}
                 ${word.antonyms ? `<p><strong>Antonyms:</strong> ${word.antonyms.join(', ')}</p>` : ''}
@@ -707,36 +759,282 @@ async function submitQuizAnswer(selectedIndex) {
 
 async function loadStats() {
     try {
-        const [overview, wordsData, reviews] = await Promise.all([
+        const [overview, wordsData, reviews, daily] = await Promise.all([
             fetch('/stats/overview').then(r => r.json()),
             fetch('/stats/words').then(r => r.json()),
-            fetch('/stats/reviews').then(r => r.json())
+            fetch('/stats/reviews').then(r => r.json()),
+            fetch('/stats/daily?days=365').then(r => r.json())
         ]);
 
-        renderStats(overview, wordsData, reviews);
+        latestStatsPayload = { overview, wordsData, reviews, daily };
+        renderStats(overview, wordsData, reviews, daily);
 
     } catch (error) {
         showToast('Failed to load stats', 'error');
     }
 }
 
-function renderStats(overview, wordsData, reviews) {
+function renderStats(overview, wordsData, reviews, daily) {
     const stats = overview.stats || {};
+    const learningRate = wordsData.learning_rate || 0;
 
     document.getElementById('stat-total').textContent = wordsData.total_words || 0;
     document.getElementById('stat-learned').textContent = wordsData.learned_words || 0;
     document.getElementById('stat-reviewed').textContent = reviews.weekly_reviews || 0;
     document.getElementById('stat-streak').textContent = stats.current_streak || 0;
-    document.getElementById('mastery-text').textContent = stats.mastery_level || 'Novice';
 
-    // Weekly chart
-    const chartContainer = document.getElementById('weekly-chart');
-    if (chartContainer && reviews.daily_stats) {
-        const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-        const maxVal = Math.max(...reviews.daily_stats.map(d => d.count), 1);
-        chartContainer.innerHTML = reviews.daily_stats.map((d, i) => `
-            <div class="chart-bar" data-day="${days[i] || d.day}" style="height: ${(d.count / maxVal) * 100}%"></div>
-        `).join('');
+    const masteryText = document.getElementById('mastery-text');
+    if (masteryText) masteryText.textContent = stats.mastery_level || 'Novice';
+
+    const masteryFill = document.getElementById('mastery-progress-fill');
+    if (masteryFill) masteryFill.style.width = `${Math.min(100, learningRate)}%`;
+
+    const masteryCaption = document.getElementById('mastery-caption');
+    if (masteryCaption) masteryCaption.textContent = `${learningRate}% learned (${wordsData.learned_words || 0}/${wordsData.total_words || 0})`;
+
+    const dailyRows = normalizeDailyRows(daily.daily_data || []);
+    const periodData = buildStatsSeries(dailyRows, statsPeriod);
+    renderActivityChart(periodData);
+    renderPeriodDetails(periodData);
+    renderDifficultyChart(wordsData.by_difficulty || {});
+}
+
+function normalizeDailyRows(rows) {
+    return rows.map(row => ({
+        date: row.date,
+        words_added: Number(row.words_added || 0),
+        words_reviewed: Number(row.words_reviewed || 0),
+        words_learned: Number(row.words_learned || 0),
+        quiz_score_avg: Number(row.quiz_score_avg || 0),
+        study_minutes: Number(row.study_minutes || 0)
+    }));
+}
+
+function formatDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function addDays(date, days) {
+    const next = new Date(date);
+    next.setDate(next.getDate() + days);
+    return next;
+}
+
+function startOfWeek(date) {
+    const next = new Date(date);
+    const day = next.getDay() || 7;
+    next.setHours(0, 0, 0, 0);
+    next.setDate(next.getDate() - day + 1);
+    return next;
+}
+
+function sumRows(rows) {
+    return rows.reduce((acc, row) => {
+        acc.added += row.words_added;
+        acc.reviewed += row.words_reviewed;
+        acc.learned += row.words_learned;
+        if (row.words_added || row.words_reviewed || row.words_learned) acc.activeDays += 1;
+        return acc;
+    }, { added: 0, reviewed: 0, learned: 0, activeDays: 0 });
+}
+
+function rowsBetween(rows, start, end) {
+    const startKey = formatDateKey(start);
+    const endKey = formatDateKey(end);
+    return rows.filter(row => row.date >= startKey && row.date <= endKey);
+}
+
+function buildStatsSeries(rows, period) {
+    const now = new Date();
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    if (period === 'day') {
+        const series = [];
+        for (let offset = 6; offset >= 0; offset--) {
+            const date = addDays(now, -offset);
+            const key = formatDateKey(date);
+            const row = rows.find(item => item.date === key);
+            series.push({
+                label: date.toLocaleDateString(undefined, { weekday: 'short' }),
+                range: key,
+                added: row?.words_added || 0,
+                reviewed: row?.words_reviewed || 0,
+                learned: row?.words_learned || 0,
+                activeDays: row && (row.words_added || row.words_reviewed || row.words_learned) ? 1 : 0
+            });
+        }
+        return {
+            period,
+            title: 'Daily Activity',
+            subtitle: 'Last 7 days of vocabulary work.',
+            label: 'Last 7 days',
+            series
+        };
+    }
+
+    if (period === 'week') {
+        const currentWeek = startOfWeek(now);
+        const series = [];
+        for (let offset = 7; offset >= 0; offset--) {
+            const start = addDays(currentWeek, -offset * 7);
+            const end = addDays(start, 6);
+            const summary = sumRows(rowsBetween(rows, start, end));
+            series.push({
+                label: `${monthNames[start.getMonth()]} ${start.getDate()}`,
+                range: `${formatDateKey(start)} - ${formatDateKey(end)}`,
+                ...summary
+            });
+        }
+        return {
+            period,
+            title: 'Weekly Activity',
+            subtitle: 'Last 8 weeks grouped by review week.',
+            label: 'Last 8 weeks',
+            series
+        };
+    }
+
+    if (period === 'month') {
+        const series = [];
+        for (let offset = 11; offset >= 0; offset--) {
+            const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+            const start = new Date(date.getFullYear(), date.getMonth(), 1);
+            const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+            const summary = sumRows(rowsBetween(rows, start, end));
+            series.push({
+                label: `${monthNames[start.getMonth()]}`,
+                range: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`,
+                ...summary
+            });
+        }
+        return {
+            period,
+            title: 'Monthly Activity',
+            subtitle: 'Last 12 months grouped by calendar month.',
+            label: 'Last 12 months',
+            series
+        };
+    }
+
+    const series = [];
+    for (let offset = 4; offset >= 0; offset--) {
+        const year = now.getFullYear() - offset;
+        const start = new Date(year, 0, 1);
+        const end = new Date(year, 11, 31);
+        const summary = sumRows(rowsBetween(rows, start, end));
+        series.push({
+            label: String(year),
+            range: String(year),
+            ...summary
+        });
+    }
+    return {
+        period,
+        title: 'Yearly Activity',
+        subtitle: 'Last 5 years grouped by calendar year.',
+        label: 'Last 5 years',
+        series
+    };
+}
+
+function renderActivityChart(periodData) {
+    const title = document.getElementById('activity-title');
+    const subtitle = document.getElementById('activity-subtitle');
+    const chart = document.getElementById('activity-chart');
+    if (!chart) return;
+
+    if (title) title.innerHTML = `<i class="fas fa-chart-column"></i> ${periodData.title}`;
+    if (subtitle) subtitle.textContent = periodData.subtitle;
+
+    const totals = periodData.series.reduce((acc, item) => {
+        acc.added += item.added;
+        acc.reviewed += item.reviewed;
+        acc.learned += item.learned;
+        acc.activeDays += item.activeDays;
+        return acc;
+    }, { added: 0, reviewed: 0, learned: 0, activeDays: 0 });
+
+    const periodTotal = document.getElementById('period-total-value');
+    if (periodTotal) periodTotal.textContent = totals.reviewed;
+
+    const maxValue = Math.max(
+        1,
+        ...periodData.series.flatMap(item => [item.added, item.reviewed, item.learned])
+    );
+
+    chart.innerHTML = `
+        ${periodData.series.map(item => `
+            <div class="activity-bar-group" title="${item.range}">
+                <div class="activity-bar added" style="height: ${(item.added / maxValue) * 100}%"></div>
+                <div class="activity-bar reviewed" style="height: ${(item.reviewed / maxValue) * 100}%"></div>
+                <div class="activity-bar learned" style="height: ${(item.learned / maxValue) * 100}%"></div>
+                <div class="activity-label">${item.label}</div>
+            </div>
+        `).join('')}
+        <div class="chart-legend">
+            <span><i class="legend-added"></i> Added</span>
+            <span><i class="legend-reviewed"></i> Reviewed</span>
+            <span><i class="legend-learned"></i> Learned</span>
+        </div>
+    `;
+
+    chart.dataset.totals = JSON.stringify(totals);
+}
+
+function renderPeriodDetails(periodData) {
+    const totals = periodData.series.reduce((acc, item) => {
+        acc.added += item.added;
+        acc.reviewed += item.reviewed;
+        acc.learned += item.learned;
+        acc.activeDays += item.activeDays;
+        return acc;
+    }, { added: 0, reviewed: 0, learned: 0, activeDays: 0 });
+
+    const label = document.getElementById('period-label');
+    if (label) label.textContent = periodData.label;
+
+    document.getElementById('period-added').textContent = totals.added;
+    document.getElementById('period-reviewed').textContent = totals.reviewed;
+    document.getElementById('period-learned').textContent = totals.learned;
+    document.getElementById('period-active-days').textContent = totals.activeDays;
+}
+
+function renderDifficultyChart(byDifficulty) {
+    const chart = document.getElementById('difficulty-chart');
+    if (!chart) return;
+
+    const levels = [1, 2, 3, 4, 5].map(level => ({
+        level,
+        count: Number(byDifficulty[`level_${level}`] || 0)
+    }));
+    const maxCount = Math.max(1, ...levels.map(item => item.count));
+
+    chart.innerHTML = levels.map(item => `
+        <div class="difficulty-row">
+            <small>Level ${item.level}</small>
+            <div class="difficulty-track">
+                <div class="difficulty-fill" style="width: ${(item.count / maxCount) * 100}%"></div>
+            </div>
+            <small>${item.count}</small>
+        </div>
+    `).join('');
+}
+
+function setStatsPeriod(period) {
+    statsPeriod = period;
+    document.querySelectorAll('.stats-period').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.period === period);
+    });
+    if (latestStatsPayload) {
+        renderStats(
+            latestStatsPayload.overview,
+            latestStatsPayload.wordsData,
+            latestStatsPayload.reviews,
+            latestStatsPayload.daily
+        );
     }
 }
 
@@ -781,6 +1079,36 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderWords();
             });
         }
+    });
+
+    const collectionSearch = document.getElementById('collection-search');
+    if (collectionSearch) {
+        collectionSearch.addEventListener('input', (e) => {
+            wordSearchQuery = e.target.value.trim();
+            renderWords();
+        });
+    }
+
+    const addedDateInput = document.getElementById('added-date-filter');
+    const clearDateBtn = document.getElementById('clear-date-filter');
+    if (addedDateInput) {
+        addedDateInput.addEventListener('change', (e) => {
+            addedDateFilter = e.target.value;
+            renderWords();
+        });
+    }
+    if (clearDateBtn) {
+        clearDateBtn.addEventListener('click', () => {
+            addedDateFilter = '';
+            if (addedDateInput) addedDateInput.value = '';
+            renderWords();
+        });
+    }
+
+    document.querySelectorAll('.stats-period').forEach(btn => {
+        btn.addEventListener('click', () => {
+            setStatsPeriod(btn.dataset.period);
+        });
     });
 
     // Review flashcard controls

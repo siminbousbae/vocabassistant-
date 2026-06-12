@@ -6,6 +6,7 @@ example filtering, and audio generation.
 
 import json
 import re
+import time
 from typing import Optional, List, Dict, Any
 import dashscope
 from dashscope import Generation
@@ -27,23 +28,28 @@ class QwenClient:
 
     def _call(self, system_prompt: str, user_prompt: str, temperature: float = 0.3) -> str:
         """Call Qwen API with retry logic."""
-        try:
-            response = Generation.call(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=temperature,
-                result_format="message"
-            )
-            if response.status_code == 200:
-                return response.output.choices[0].message.content
-            else:
+        last_error = None
+        for attempt in range(1, 4):
+            try:
+                response = Generation.call(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=temperature,
+                    result_format="message"
+                )
+                if response.status_code == 200:
+                    return response.output.choices[0].message.content
                 raise Exception(f"Qwen API error: {response.status_code} - {response.message}")
-        except Exception as e:
-            print(f"Qwen API call failed: {e}")
-            raise
+            except Exception as e:
+                last_error = e
+                print(f"Qwen API call failed (attempt {attempt}/3): {e}")
+                if attempt < 3:
+                    time.sleep(1.5 * attempt)
+
+        raise last_error
 
     def get_word_info(self, word: str) -> Dict[str, Any]:
         """

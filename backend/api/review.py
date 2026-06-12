@@ -91,7 +91,8 @@ async def get_quiz(user_id: Optional[int] = None, num_questions: int = 5):
     """Generate a quiz with multiple choice questions."""
     result = review_quiz_agent.run(
         action="quiz",
-        user_id=user_id
+        user_id=user_id,
+        limit=num_questions
     )
     return result
 

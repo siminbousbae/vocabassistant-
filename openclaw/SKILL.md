@@ -26,7 +26,7 @@ Agent Router
     ├── VocabTutorAgent (Qwen)
     └── ReviewQuizAgent (SM-2 + Qwen)
     ↓
-FastAPI Backend (/api/agents/*)
+FastAPI Backend (/agents/*)
     ↓
 Database (SQLite)
 ```
@@ -39,7 +39,7 @@ Database (SQLite)
 name: vocab-assistant
 version: 1.0.0
 platform: telegram
-endpoint: http://localhost:8000/api/agents
+endpoint: http://localhost:8000/agents
 webhook: /webhook
 timeout: 30
 

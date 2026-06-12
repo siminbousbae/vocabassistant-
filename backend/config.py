@@ -6,7 +6,7 @@ Loads environment variables from .env file.
 import os
 from pathlib import Path
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 from dotenv import load_dotenv
 
 # Load .env file from project root
@@ -79,6 +79,23 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_sqlite_url(cls, value: str) -> str:
+        """Resolve relative SQLite paths from the project root."""
+        if not isinstance(value, str) or not value.startswith("sqlite:///"):
+            return value
+
+        db_path = value.replace("sqlite:///", "", 1)
+        if db_path == ":memory:":
+            return value
+
+        path = Path(db_path)
+        if path.is_absolute():
+            return value
+
+        return f"sqlite:///{(PROJECT_ROOT / path).resolve()}"
 
 
 # Global settings instance

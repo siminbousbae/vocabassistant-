@@ -29,8 +29,13 @@ class VocabTutorAgent(BaseAgent):
     def __init__(self):
         super().__init__("VocabTutorAgent")
 
-    def execute(self, word: str, user_id: Optional[int] = None, 
-                update_existing: bool = False) -> Dict[str, Any]:
+    def execute(
+        self,
+        word: str,
+        user_id: Optional[int] = None,
+        update_existing: bool = False,
+        word_id: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
         Generate or enrich word information.
 
@@ -38,6 +43,7 @@ class VocabTutorAgent(BaseAgent):
             word: English word to analyze
             user_id: Optional user ID
             update_existing: If True, updates existing DB record
+            word_id: Optional existing word ID to enrich
 
         Returns:
             Dict with full word data
@@ -61,7 +67,11 @@ class VocabTutorAgent(BaseAgent):
         }
 
         # Update database if requested
-        if update_existing:
+        if word_id is not None:
+            updated = self._update_database_by_id(word_id, result, user_id)
+            if not updated:
+                return {"success": False, "error": "Word not found"}
+        elif update_existing:
             self._update_database(word, result, user_id)
 
         # Log activity
@@ -125,6 +135,42 @@ class VocabTutorAgent(BaseAgent):
                 existing.synonyms = data["synonyms"]
                 existing.antonyms = data["antonyms"]
                 db.commit()
+            else:
+                db_word = Word(
+                    user_id=user_id,
+                    word=word,
+                    phonetic=data["phonetic"],
+                    part_of_speech=data["part_of_speech"],
+                    chinese_meaning=data["chinese_meaning"],
+                    collocations=data["collocations"],
+                    synonyms=data["synonyms"],
+                    antonyms=data["antonyms"],
+                )
+                db.add(db_word)
+                db.commit()
+        finally:
+            db.close()
+
+    def _update_database_by_id(self, word_id: int, data: Dict, user_id: Optional[int] = None) -> bool:
+        """Update an existing word by ID."""
+        db = get_db_session()
+        try:
+            query = db.query(Word).filter(Word.id == word_id)
+            if user_id is not None:
+                query = query.filter(Word.user_id == user_id)
+
+            existing = query.first()
+            if not existing:
+                return False
+
+            existing.phonetic = data["phonetic"]
+            existing.part_of_speech = data["part_of_speech"]
+            existing.chinese_meaning = data["chinese_meaning"]
+            existing.collocations = data["collocations"]
+            existing.synonyms = data["synonyms"]
+            existing.antonyms = data["antonyms"]
+            db.commit()
+            return True
         finally:
             db.close()
 

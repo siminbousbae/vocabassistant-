@@ -51,7 +51,11 @@ def _word_to_dict(word: Word) -> dict:
     """Convert Word ORM object to dict with datetime fields as strings."""
     is_due = True
     if word.reviews:
-        is_due = word.reviews[0].is_due
+        review = word.reviews[0]
+        is_due = (
+            review.next_review_date is None
+            or review.next_review_date <= datetime.now()
+        )
 
     return {
         "id": word.id,
@@ -87,22 +91,23 @@ async def add_word(data: WordCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=result.get("error", "Agent failed"))
 
     db_word = db.query(Word).filter(Word.word == data.word.lower()).first()
+    if not db_word:
+        raise HTTPException(status_code=500, detail="Agent completed but word was not saved")
 
     # Create a review record so the word appears in daily reviews
-    if db_word:
-        review = db.query(Review).filter(Review.word_id == db_word.id).first()
-        if not review:
-            review = Review(
-                word_id=db_word.id,
-                user_id=data.user_id,
-                interval=1,
-                ease_factor=2.5,
-                repetitions=0,
-                is_due=True,
-                next_review_date=None
-            )
-            db.add(review)
-            db.commit()
+    review = db.query(Review).filter(Review.word_id == db_word.id).first()
+    if not review:
+        review = Review(
+            word_id=db_word.id,
+            user_id=data.user_id,
+            interval=1,
+            ease_factor=2.5,
+            repetitions=0,
+            is_due=True,
+            next_review_date=None
+        )
+        db.add(review)
+        db.commit()
 
     return _word_to_dict(db_word)
 
@@ -125,7 +130,7 @@ async def list_words(
     query = db.query(Word).options(selectinload(Word.reviews))
     if learned is not None:
         query = query.filter(Word.learned == learned)
-    words = query.offset(skip).limit(limit).all()
+    words = query.order_by(Word.created_at.desc(), Word.id.desc()).offset(skip).limit(limit).all()
     return [_word_to_dict(w) for w in words]
 
 @router.put("/update/{word_id}", response_model=WordResponse)
@@ -164,17 +169,7 @@ async def enrich_word(word_id: int, db: Session = Depends(get_db)):
     if not db_word:
         raise HTTPException(status_code=404, detail="Word not found")
 
-    result = vocab_tutor_agent.run(
-        word=db_word.word,
-        word_id=word_id,
-        existing_data={
-            "phonetic": db_word.phonetic,
-            "part_of_speech": db_word.part_of_speech,
-            "chinese_meaning": db_word.chinese_meaning,
-            "example_sentence": db_word.example_sentence,
-            "chinese_translation": db_word.chinese_translation
-        }
-    )
+    result = vocab_tutor_agent.run(word=db_word.word, word_id=word_id)
 
     if not result.get("success"):
         raise HTTPException(status_code=500, detail=result.get("error", "Enrichment failed"))

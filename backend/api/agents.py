@@ -119,9 +119,9 @@ async def get_due_words(user_id: Optional[int] = None):
 
 
 @router.get("/quiz")
-async def get_quiz(user_id: Optional[int] = None):
+async def get_quiz(user_id: Optional[int] = None, num_questions: int = 5):
     """Generate a quiz with multiple choice questions."""
-    result = review_quiz_agent.run(action="quiz", user_id=user_id)
+    result = review_quiz_agent.run(action="quiz", user_id=user_id, limit=num_questions)
     return {
         "success": True,
         "data": result

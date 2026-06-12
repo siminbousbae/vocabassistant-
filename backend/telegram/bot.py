@@ -15,7 +15,9 @@ Commands (hidden from user, used internally):
 
 import asyncio
 from typing import Dict, Any, Optional
+from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -28,7 +30,7 @@ from backend.config import settings
 from backend.agents.example_search import example_search_agent
 from backend.agents.review_quiz import review_quiz_agent
 from backend.database.connection import get_db_session
-from backend.database.models import Word, Review
+from backend.database.models import Word, Review, LearningRecord, DailyStats
 
 # ============== KEYBOARD LAYOUTS ==============
 
@@ -61,17 +63,31 @@ def get_review_keyboard(word_id: int) -> InlineKeyboardMarkup:
     """SM-2 quality rating keyboard."""
     keyboard = [
         [
-            InlineKeyboardButton("😵 0", callback_data=f"review_{word_id}_0"),
+            InlineKeyboardButton("😵 0 Again", callback_data=f"review_{word_id}_0"),
             InlineKeyboardButton("😟 1", callback_data=f"review_{word_id}_1"),
-            InlineKeyboardButton("😐 2", callback_data=f"review_{word_id}_2")
+            InlineKeyboardButton("😐 2 Hard", callback_data=f"review_{word_id}_2")
         ],
         [
             InlineKeyboardButton("🙂 3", callback_data=f"review_{word_id}_3"),
-            InlineKeyboardButton("😊 4", callback_data=f"review_{word_id}_4"),
-            InlineKeyboardButton("🤩 5", callback_data=f"review_{word_id}_5")
+            InlineKeyboardButton("😊 4 Good", callback_data=f"review_{word_id}_4"),
+            InlineKeyboardButton("🤩 5 Easy", callback_data=f"review_{word_id}_5")
         ],
         [InlineKeyboardButton("⏭️ Skip", callback_data=f"review_{word_id}_skip")],
         [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_main")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_review_front_keyboard(word_id: int) -> InlineKeyboardMarkup:
+    """Flashcard front controls for Telegram review."""
+    keyboard = [
+        [
+            InlineKeyboardButton("👁️ Show Answer", callback_data=f"review_reveal_{word_id}"),
+            InlineKeyboardButton("🔊 Listen", callback_data=f"audio_{word_id}")
+        ],
+        [
+            InlineKeyboardButton("⏭️ Skip", callback_data=f"review_{word_id}_skip"),
+            InlineKeyboardButton("⬅️ Menu", callback_data="menu_main")
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -90,16 +106,25 @@ def get_quiz_keyboard(word_id: int, options: list, correct_index: int) -> Inline
 def get_stats_keyboard() -> InlineKeyboardMarkup:
     """Stats view keyboard."""
     keyboard = [
-        [InlineKeyboardButton("📈 Overview", callback_data="stats_overview")],
-        [InlineKeyboardButton("📅 Daily Progress", callback_data="stats_daily")],
-        [InlineKeyboardButton("🔥 Streak", callback_data="stats_streak")],
+        [
+            InlineKeyboardButton("📈 Overview", callback_data="stats_overview"),
+            InlineKeyboardButton("🏆 Mastery", callback_data="stats_mastery")
+        ],
+        [
+            InlineKeyboardButton("📅 Day", callback_data="stats_period_day"),
+            InlineKeyboardButton("🗓️ Week", callback_data="stats_period_week")
+        ],
+        [
+            InlineKeyboardButton("📆 Month", callback_data="stats_period_month"),
+            InlineKeyboardButton("📊 Year", callback_data="stats_period_year")
+        ],
         [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_main")]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_words_list_keyboard(words: list, page: int = 0) -> InlineKeyboardMarkup:
     """Paginated word list keyboard."""
-    keyboard = []
+    keyboard = [[InlineKeyboardButton("🔎 Search Words", callback_data="words_search")]]
     per_page = 5
     start = page * per_page
     end = start + per_page
@@ -130,6 +155,24 @@ def get_word_detail_keyboard(word_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("🔄 Review Now", callback_data=f"review_start_{word_id}")],
         [InlineKeyboardButton("🗑️ Delete", callback_data=f"delete_{word_id}")],
         [InlineKeyboardButton("⬅️ Back to List", callback_data="menu_words")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def get_word_added_keyboard(word_id: int) -> InlineKeyboardMarkup:
+    """Quick actions shown immediately after adding a word."""
+    keyboard = [
+        [
+            InlineKeyboardButton("🔊 Listen", callback_data=f"audio_{word_id}"),
+            InlineKeyboardButton("🔄 Review Now", callback_data=f"review_start_{word_id}")
+        ],
+        [
+            InlineKeyboardButton("📖 Details", callback_data=f"word_detail_{word_id}"),
+            InlineKeyboardButton("📚 My Words", callback_data="menu_words")
+        ],
+        [
+            InlineKeyboardButton("➕ Add Another", callback_data="menu_add"),
+            InlineKeyboardButton("⬅️ Menu", callback_data="menu_main")
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -204,7 +247,13 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle all inline button callbacks."""
     query = update.callback_query
-    await query.answer()  # Remove loading state
+    try:
+        await query.answer()  # Remove loading state
+    except BadRequest as e:
+        if "Query is too old" in str(e) or "query id is invalid" in str(e):
+            print(f"Ignoring expired Telegram callback: {e}")
+            return
+        raise
 
     data = query.data
     chat_id = query.message.chat_id
@@ -219,6 +268,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "menu_words":
         await _delete_audio_messages(context, chat_id)
         await show_words_list(query, context, page=0)
+    elif data == "words_search":
+        await _delete_audio_messages(context, chat_id)
+        await prompt_for_word_search(query, context)
     elif data == "menu_review":
         await _delete_audio_messages(context, chat_id)
         await start_review_session(query, context)
@@ -253,6 +305,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         word_id = int(data.split("_")[-1])
         await _delete_audio_messages(context, chat_id)
         await show_word_for_review(query, context, word_id)
+    elif data.startswith("review_reveal_"):
+        word_id = int(data.split("_")[-1])
+        await show_review_answer(query, context, word_id)
     elif data.startswith("review_") and "_skip" not in data:
         parts = data.split("_")
         word_id = int(parts[1])
@@ -287,9 +342,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "stats_overview":
         await show_stats_overview(query, context)
     elif data == "stats_daily":
-        await show_daily_stats(query, context)
+        await show_period_stats(query, context, "day")
     elif data == "stats_streak":
         await show_streak(query, context)
+    elif data == "stats_mastery":
+        await show_mastery_stats(query, context)
+    elif data.startswith("stats_period_"):
+        period = data.replace("stats_period_", "")
+        await show_period_stats(query, context, period)
 
 # ============== FLOW IMPLEMENTATIONS ==============
 
@@ -331,6 +391,23 @@ async def prompt_for_word(query, context, mode: str):
         text,
         parse_mode=None,
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Cancel", callback_data="menu_main")]])
+    )
+
+async def prompt_for_word_search(query, context):
+    """Prompt user to search inside saved vocabulary."""
+    context.user_data["state"] = "waiting_for_word_to_search"
+
+    text = (
+        "🔎 Search Your Words\n\n"
+        "Type a word, part of a word, or Chinese meaning to search your saved vocabulary.\n"
+        "Example: sanction, stat, 统计"
+    )
+    await query.edit_message_text(
+        text,
+        parse_mode=None,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Back to My Words", callback_data="menu_words")]
+        ])
     )
 
 async def add_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, word: str):
@@ -383,10 +460,12 @@ async def add_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, word
         if word_data.get("antonyms"):
             response += f"\n🔀 *Antonyms:* {', '.join(word_data['antonyms'])}"
 
+        word_id = result.get("database_id")
+
         await processing_msg.edit_text(
             response,
             parse_mode=None,
-            reply_markup=get_main_menu_keyboard(),
+            reply_markup=get_word_added_keyboard(word_id) if word_id else get_main_menu_keyboard(),
             disable_web_page_preview=True
         )
 
@@ -401,38 +480,73 @@ async def add_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, word
 
 async def search_word_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, word: str):
     """Search for existing word in database."""
+    search_text = word.strip()
+    normalized = search_text.lower()
     db = get_db_session()
     try:
-        db_word = db.query(Word).filter(Word.word == word.lower()).first()
+        db_word = db.query(Word).filter(Word.word == normalized).first()
 
-        if not db_word:
+        if db_word:
+            # Show exact word detail immediately
+            response = (
+                f"📖 *{db_word.word.upper()}*\n\n"
+                f"📌 *Phonetic:* {db_word.phonetic or 'N/A'}\n"
+                f"📌 *POS:* {db_word.part_of_speech or 'N/A'}\n"
+                f"📌 *Meaning:* {db_word.chinese_meaning or 'N/A'}\n\n"
+                f"📝 *Example:*\n_{db_word.example_sentence or 'N/A'}_\n\n"
+                f"🌐 *Translation:* {db_word.chinese_translation or 'N/A'}\n\n"
+                f"📰 *Source:* {db_word.source_name or 'N/A'}"
+            )
+
             await update.message.reply_text(
-                f"❌ Word '*{word}*' not found in your vocabulary.\n\n"
-                f"Would you like to add it?",
+                response,
+                parse_mode=None,
+                reply_markup=get_word_detail_keyboard(db_word.id),
+                disable_web_page_preview=True
+            )
+            return
+
+        words = db.query(Word).order_by(Word.created_at.desc(), Word.id.desc()).all()
+        matches = [
+            w for w in words
+            if normalized in (w.word or "").lower()
+            or normalized in (w.chinese_meaning or "").lower()
+            or normalized in (w.part_of_speech or "").lower()
+            or normalized in (w.source_name or "").lower()
+        ][:10]
+
+        if not matches:
+            await update.message.reply_text(
+                f"❌ No saved words found for '{search_text}'.\n\n"
+                "Would you like to add it as a new word?",
                 parse_mode=None,
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("➕ Add This Word", callback_data="menu_add")],
-                    [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_main")]
+                    [InlineKeyboardButton("🔎 Search Again", callback_data="words_search")],
+                    [InlineKeyboardButton("⬅️ Back to My Words", callback_data="menu_words")]
                 ])
             )
             return
 
-        # Show word detail
-        response = (
-            f"📖 *{db_word.word.upper()}*\n\n"
-            f"📌 *Phonetic:* {db_word.phonetic or 'N/A'}\n"
-            f"📌 *POS:* {db_word.part_of_speech or 'N/A'}\n"
-            f"📌 *Meaning:* {db_word.chinese_meaning or 'N/A'}\n\n"
-            f"📝 *Example:*\n_{db_word.example_sentence or 'N/A'}_\n\n"
-            f"🌐 *Translation:* {db_word.chinese_translation or 'N/A'}\n\n"
-            f"📰 *Source:* {db_word.source_name or 'N/A'}"
-        )
+        keyboard = [
+            [InlineKeyboardButton(
+                f"📖 {w.word} - {(w.chinese_meaning or '...')[:24]}",
+                callback_data=f"word_detail_{w.id}"
+            )]
+            for w in matches
+        ]
+        keyboard.append([InlineKeyboardButton("🔎 Search Again", callback_data="words_search")])
+        keyboard.append([InlineKeyboardButton("⬅️ Back to My Words", callback_data="menu_words")])
 
+        result_text = (
+            f"🔎 Search Results for '{search_text}'\n\n"
+            f"Found {len(matches)} matching word{'s' if len(matches) != 1 else ''}.\n"
+            "Tap a word to open details:"
+        )
         await update.message.reply_text(
-            response,
+            result_text,
             parse_mode=None,
-            reply_markup=get_word_detail_keyboard(db_word.id),
-            disable_web_page_preview=True
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
     finally:
@@ -442,7 +556,7 @@ async def show_words_list(query, context, page: int = 0):
     """Show paginated list of user's words."""
     db = get_db_session()
     try:
-        words = db.query(Word).all()
+        words = db.query(Word).order_by(Word.created_at.desc(), Word.id.desc()).all()
 
         if not words:
             await query.edit_message_text(
@@ -569,8 +683,12 @@ async def show_word_for_review(query, context, word_id: int):
         context.user_data["review_queue"] = [{
             "word_id": word.id,
             "word": word.word,
+            "phonetic": word.phonetic or "",
+            "part_of_speech": word.part_of_speech or "",
             "chinese_meaning": word.chinese_meaning or "",
-            "example_sentence": word.example_sentence or ""
+            "example_sentence": word.example_sentence or "",
+            "chinese_translation": word.chinese_translation or "",
+            "source_name": word.source_name or ""
         }]
         context.user_data["review_index"] = 0
         
@@ -587,9 +705,10 @@ async def show_next_review_word(query, context):
     if index >= len(queue):
         # Review session complete
         await query.edit_message_text(
-            f"🎉 *Review Complete!*\n\n"
-            f"You reviewed {len(queue)} words today.\n"
-            f"Keep up the great work! 🌟",
+            f"🎉 Review Complete!\n\n"
+            f"Reviewed cards: {len(queue)}\n"
+            f"Remaining cards: 0\n\n"
+            "Nice work. Your next review dates were updated for the cards you rated.",
             parse_mode=None,
             reply_markup=get_main_menu_keyboard()
         )
@@ -598,19 +717,92 @@ async def show_next_review_word(query, context):
         return
 
     word = queue[index]
+    word_id = word["word_id"]
+
+    db = get_db_session()
+    try:
+        db_word = db.query(Word).filter(Word.id == word_id).first()
+        if db_word:
+            word.update({
+                "word": db_word.word,
+                "phonetic": db_word.phonetic or word.get("phonetic", ""),
+                "part_of_speech": db_word.part_of_speech or word.get("part_of_speech", ""),
+                "chinese_meaning": db_word.chinese_meaning or word.get("chinese_meaning", ""),
+                "example_sentence": db_word.example_sentence or word.get("example_sentence", ""),
+                "chinese_translation": db_word.chinese_translation or word.get("chinese_translation", ""),
+                "source_name": db_word.source_name or word.get("source_name", "")
+            })
+    finally:
+        db.close()
 
     text = (
-        f"🔄 *Review ({index + 1}/{len(queue)})*\n\n"
-        f"📖 *{word['word'].upper()}*\n"
-        f"📌 {word['chinese_meaning']}\n\n"
-        f"📝 *Example:*\n_{word['example_sentence']}_\n\n"
-        f"How well did you remember this word?"
+        f"🔄 Review Flashcard ({index + 1}/{len(queue)})\n\n"
+        f"📖 {word['word'].upper()}\n"
+        f"🔤 {word.get('phonetic') or 'No phonetic yet'}\n"
+        f"🏷️ {word.get('part_of_speech') or 'Part of speech unknown'}\n\n"
+        "Try to remember the meaning and example before revealing the answer."
     )
 
     await query.edit_message_text(
         text,
         parse_mode=None,
-        reply_markup=get_review_keyboard(word["word_id"])
+        reply_markup=get_review_front_keyboard(word_id)
+    )
+
+async def show_review_answer(query, context, word_id: int):
+    """Reveal the answer side of a Telegram review flashcard."""
+    queue = context.user_data.get("review_queue", [])
+    index = context.user_data.get("review_index", 0)
+
+    word = None
+    if index < len(queue) and queue[index].get("word_id") == word_id:
+        word = queue[index]
+
+    db = get_db_session()
+    try:
+        db_word = db.query(Word).filter(Word.id == word_id).first()
+        if not db_word:
+            await query.edit_message_text(
+                "❌ Word not found.",
+                reply_markup=get_main_menu_keyboard()
+            )
+            return
+
+        if word is None:
+            word = {"word_id": db_word.id}
+
+        word.update({
+            "word": db_word.word,
+            "phonetic": db_word.phonetic or "",
+            "part_of_speech": db_word.part_of_speech or "",
+            "chinese_meaning": db_word.chinese_meaning or "",
+            "example_sentence": db_word.example_sentence or "",
+            "chinese_translation": db_word.chinese_translation or "",
+            "source_name": db_word.source_name or ""
+        })
+    finally:
+        db.close()
+
+    total = len(queue) if queue else 1
+    position = index + 1 if queue else 1
+    text = (
+        f"🔄 Review Answer ({position}/{total})\n\n"
+        f"📖 {word['word'].upper()}\n"
+        f"📌 Meaning: {word.get('chinese_meaning') or 'N/A'}\n\n"
+        f"📝 Example:\n{word.get('example_sentence') or 'N/A'}\n\n"
+        f"🌐 Translation:\n{word.get('chinese_translation') or 'N/A'}\n"
+    )
+
+    if word.get("source_name"):
+        text += f"\n📰 Source: {word['source_name']}"
+
+    text += "\n\nHow well did you remember it?"
+
+    await query.edit_message_text(
+        text,
+        parse_mode=None,
+        reply_markup=get_review_keyboard(word_id),
+        disable_web_page_preview=True
     )
 
 async def submit_review(query, context, word_id: int, quality: int):
@@ -740,14 +932,167 @@ async def handle_quiz_answer(query, context, word_id: int, selected: int, correc
 async def show_stats_menu(query, context):
     """Show statistics menu."""
     text = (
-        "📊 *Statistics*\n\n"
-        "Choose what to view:"
+        "📊 Learning Statistics\n\n"
+        "Choose a view. These numbers match the same ideas as the web dashboard: words, reviews, activity periods, mastery, and difficulty."
     )
     await query.edit_message_text(
         text,
         parse_mode=None,
         reply_markup=get_stats_keyboard()
     )
+
+def _bar(value: int, max_value: int, width: int = 8) -> str:
+    """Small text bar for Telegram charts."""
+    if max_value <= 0 or value <= 0:
+        return "░" * width
+    filled = max(1, round((value / max_value) * width))
+    filled = min(width, filled)
+    return "█" * filled + "░" * (width - filled)
+
+def _date_key(date_value: datetime) -> str:
+    return date_value.strftime("%Y-%m-%d")
+
+def _start_of_week(date_value: datetime) -> datetime:
+    start = date_value.replace(hour=0, minute=0, second=0, microsecond=0)
+    return start - timedelta(days=start.weekday())
+
+def _sum_activity(db, start: datetime, end: datetime) -> Dict[str, int]:
+    """Summarize added/reviewed/learned counts for a date range."""
+    added = db.query(Word).filter(
+        Word.created_at >= start,
+        Word.created_at <= end
+    ).count()
+
+    reviewed = db.query(LearningRecord).filter(
+        LearningRecord.action == "reviewed",
+        LearningRecord.created_at >= start,
+        LearningRecord.created_at <= end
+    ).count()
+
+    start_key = _date_key(start)
+    end_key = _date_key(end)
+    learned = db.query(DailyStats).filter(
+        DailyStats.date >= start_key,
+        DailyStats.date <= end_key
+    ).with_entities(DailyStats.words_learned).all()
+    learned_count = sum(row[0] or 0 for row in learned)
+
+    return {
+        "added": added,
+        "reviewed": reviewed,
+        "learned": learned_count,
+        "active": 1 if added or reviewed or learned_count else 0
+    }
+
+def _build_period_series(period: str) -> Dict[str, Any]:
+    """Build the same day/week/month/year activity concepts used by the web dashboard."""
+    now = datetime.now()
+    db = get_db_session()
+    try:
+        month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        series = []
+
+        if period == "day":
+            for offset in range(6, -1, -1):
+                start = (now - timedelta(days=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+                end = start.replace(hour=23, minute=59, second=59, microsecond=999999)
+                series.append({
+                    "label": start.strftime("%a"),
+                    "range": _date_key(start),
+                    **_sum_activity(db, start, end)
+                })
+            return {
+                "title": "Daily Activity",
+                "subtitle": "Last 7 days",
+                "series": series
+            }
+
+        if period == "week":
+            current_week = _start_of_week(now)
+            for offset in range(7, -1, -1):
+                start = current_week - timedelta(days=offset * 7)
+                end = start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+                series.append({
+                    "label": f"{month_names[start.month - 1]} {start.day}",
+                    "range": f"{_date_key(start)} to {_date_key(end)}",
+                    **_sum_activity(db, start, end)
+                })
+            return {
+                "title": "Weekly Activity",
+                "subtitle": "Last 8 weeks",
+                "series": series
+            }
+
+        if period == "month":
+            for offset in range(11, -1, -1):
+                month_index = now.month - 1 - offset
+                year = now.year + month_index // 12
+                month = month_index % 12 + 1
+                start = datetime(year, month, 1)
+                if month == 12:
+                    end = datetime(year + 1, 1, 1) - timedelta(microseconds=1)
+                else:
+                    end = datetime(year, month + 1, 1) - timedelta(microseconds=1)
+                series.append({
+                    "label": month_names[month - 1],
+                    "range": f"{year}-{month:02d}",
+                    **_sum_activity(db, start, end)
+                })
+            return {
+                "title": "Monthly Activity",
+                "subtitle": "Last 12 months",
+                "series": series
+            }
+
+        for offset in range(4, -1, -1):
+            year = now.year - offset
+            start = datetime(year, 1, 1)
+            end = datetime(year, 12, 31, 23, 59, 59, 999999)
+            series.append({
+                "label": str(year),
+                "range": str(year),
+                **_sum_activity(db, start, end)
+            })
+        return {
+            "title": "Yearly Activity",
+            "subtitle": "Last 5 years",
+            "series": series
+        }
+    finally:
+        db.close()
+
+def _format_period_chart(period_data: Dict[str, Any]) -> str:
+    series = period_data["series"]
+    max_reviewed = max([item["reviewed"] for item in series] + [1])
+    totals = {
+        "added": sum(item["added"] for item in series),
+        "reviewed": sum(item["reviewed"] for item in series),
+        "learned": sum(item["learned"] for item in series),
+        "active": sum(item["active"] for item in series),
+    }
+
+    lines = [
+        f"📊 {period_data['title']}",
+        f"{period_data['subtitle']}",
+        "",
+        f"Total added: {totals['added']}",
+        f"Total reviewed: {totals['reviewed']}",
+        f"Total learned: {totals['learned']}",
+        f"Active days/periods: {totals['active']}",
+        "",
+        "Reviews chart:"
+    ]
+
+    for item in series:
+        lines.append(
+            f"{item['label']:>6}  {_bar(item['reviewed'], max_reviewed)}  R:{item['reviewed']} A:{item['added']} L:{item['learned']}"
+        )
+
+    lines.extend([
+        "",
+        "Legend: R = reviewed, A = added, L = learned"
+    ])
+    return "\n".join(lines)
 
 async def show_stats_overview(query, context):
     """Show overview statistics."""
@@ -761,17 +1106,23 @@ async def show_stats_overview(query, context):
         return
 
     stats = result["stats"]
+    total_words = stats.get("total_words", 0)
+    learned_words = stats.get("learned_words", 0)
+    learning_rate = round((learned_words / total_words * 100), 1) if total_words else 0
+    due_words = stats.get("due_words", 0)
+    total_reviews = stats.get("total_reviews", 0)
 
     text = (
-        f"📊 *Learning Overview*\n\n"
-        f"📚 Total Words: {stats['total_words']}\n"
-        f"✅ Learned: {stats['learned_words']}\n"
-        f"📈 Learning Rate: {stats['learning_rate']}%\n\n"
-        f"🔄 Due Today: {stats['due_today']}\n"
-        f"📅 Weekly Reviews: {stats['weekly_reviews']}\n"
-        f"⭐ Average Quality: {stats['average_quality']}\n\n"
-        f"🔥 Current Streak: {stats['current_streak']} days\n"
-        f"🏆 Mastery Level: {stats['mastery_level']}"
+        "📊 Learning Overview\n\n"
+        f"📚 Total words: {total_words}\n"
+        f"✅ Learned words: {learned_words}\n"
+        f"📈 Learning rate: {learning_rate}%\n"
+        f"🔄 Due for review: {due_words}\n\n"
+        f"📝 Total reviews: {total_reviews}\n"
+        f"⭐ Average quality: {stats.get('average_quality', 0)} / 5\n"
+        f"🔥 Current streak: {stats.get('current_streak', 0)} days\n"
+        f"🏆 Mastery level: {stats.get('mastery_level', 'Novice')}\n\n"
+        "Use Day / Week / Month / Year for activity charts."
     )
 
     await query.edit_message_text(
@@ -781,13 +1132,17 @@ async def show_stats_overview(query, context):
     )
 
 async def show_daily_stats(query, context):
-    """Show daily progress chart (text-based)."""
-    text = (
-        "📅 *Daily Progress*\n\n"
-        "Last 7 days activity:\n\n"
-        "📈 Coming soon: detailed daily charts!\n\n"
-        "Use the web app for full visual statistics."
-    )
+    """Backward-compatible daily stats callback."""
+    await show_period_stats(query, context, "day")
+
+async def show_period_stats(query, context, period: str):
+    """Show day/week/month/year activity with a Telegram-friendly text chart."""
+    if period not in {"day", "week", "month", "year"}:
+        period = "day"
+
+    period_data = _build_period_series(period)
+    text = _format_period_chart(period_data)
+
     await query.edit_message_text(
         text,
         parse_mode=None,
@@ -800,9 +1155,46 @@ async def show_streak(query, context):
     streak = result.get("stats", {}).get("current_streak", 0) if result.get("success") else 0
 
     text = (
-        f"🔥 *Learning Streak*\n\n"
-        f"Current Streak: *{streak} days*\n\n"
+        "🔥 Learning Streak\n\n"
+        f"Current streak: {streak} days\n\n"
         f"{'🌟 Amazing consistency! Keep it up!' if streak >= 7 else '💪 Keep reviewing daily to build your streak!' if streak >= 3 else '📚 Start your streak by reviewing words today!'}"
+    )
+
+    await query.edit_message_text(
+        text,
+        parse_mode=None,
+        reply_markup=get_stats_keyboard()
+    )
+
+async def show_mastery_stats(query, context):
+    """Show mastery and difficulty distribution."""
+    result = review_quiz_agent.run(action="stats")
+    stats = result.get("stats", {}) if result.get("success") else {}
+
+    db = get_db_session()
+    try:
+        total_words = stats.get("total_words", db.query(Word).count())
+        learned_words = stats.get("learned_words", db.query(Word).filter(Word.learned == True).count())
+        learning_rate = round((learned_words / total_words * 100), 1) if total_words else 0
+        difficulty_counts = {}
+        for level in range(1, 6):
+            difficulty_counts[level] = db.query(Word).filter(Word.difficulty == level).count()
+    finally:
+        db.close()
+
+    max_count = max(list(difficulty_counts.values()) + [1])
+    difficulty_lines = [
+        f"Level {level}: {_bar(count, max_count)} {count}"
+        for level, count in difficulty_counts.items()
+    ]
+
+    text = (
+        "🏆 Mastery Details\n\n"
+        f"Level: {stats.get('mastery_level', 'Novice')}\n"
+        f"Learned: {learned_words}/{total_words} ({learning_rate}%)\n"
+        f"Due now: {stats.get('due_words', 0)}\n\n"
+        "Difficulty distribution:\n"
+        + "\n".join(difficulty_lines)
     )
 
     await query.edit_message_text(
@@ -835,17 +1227,21 @@ async def send_audio(query, context, word_id: int):
                 audio_path = fp.name
 
             # Send as voice message to Telegram
-            sent_message = await context.bot.send_voice(
-                chat_id=query.message.chat_id,
-                voice=open(audio_path, 'rb'),
-                caption=f"🔊 {word.word.upper()} — [{word.phonetic or 'N/A'}]"
-            )
+            with open(audio_path, 'rb') as audio_file:
+                sent_message = await context.bot.send_voice(
+                    chat_id=query.message.chat_id,
+                    voice=audio_file,
+                    caption=f"🔊 {word.word.upper()} — [{word.phonetic or 'N/A'}]"
+                )
 
             # TRACK the audio message ID so we can delete it later
             await _track_audio_message(context, sent_message.message_id)
 
             # Cleanup temp file
-            os.remove(audio_path)
+            try:
+                os.remove(audio_path)
+            except OSError as cleanup_error:
+                print(f"Could not delete temp audio file: {cleanup_error}")
 
             # Answer the callback query
             await query.answer("Audio sent!")
@@ -935,6 +1331,10 @@ async def handle_update(update_data: dict):
 
 # ============== BOT INITIALIZATION ==============
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Log Telegram handler errors without stopping the bot."""
+    print(f"Telegram handler error: {context.error}")
+
 def create_bot_application() -> Application:
     """Create and configure the bot application."""
     application = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
@@ -947,6 +1347,7 @@ def create_bot_application() -> Application:
 
     # Callback query handlers
     application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_error_handler(error_handler)
 
     return application
 

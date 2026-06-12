@@ -25,5 +25,8 @@ dashscope==1.20.0
 # Scheduling
 APScheduler==3.10.4
 
+# Text-to-speech for Telegram audio
+gTTS==2.5.4
+
 # For testing
 pytest==8.3.0

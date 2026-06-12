@@ -44,23 +44,23 @@ skills:
   vocab-assistant:
     endpoint: "http://localhost:8000"
     routes:
-      - path: "/api/agents/example-search"
+      - path: "/agents/example-search"
         method: "POST"
         handler: "ExampleSearchAgent"
 
-      - path: "/api/agents/vocab-tutor"
+      - path: "/agents/vocab-tutor"
         method: "POST"
         handler: "VocabTutorAgent"
 
-      - path: "/api/agents/review"
+      - path: "/agents/review"
         method: "POST"
         handler: "ReviewQuizAgent"
 
-      - path: "/api/agents/due-words"
+      - path: "/agents/due-words"
         method: "GET"
         handler: "ReviewQuizAgent"
 
-      - path: "/api/agents/quiz"
+      - path: "/agents/quiz"
         method: "GET"
         handler: "ReviewQuizAgent"
 

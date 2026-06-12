@@ -23,11 +23,15 @@ async def get_overview_stats(user_id: Optional[int] = None, db: Session = Depend
 
 
 @router.get("/words")
-async def get_word_stats(db: Session = Depends(get_db)):
+async def get_word_stats(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     """Get word-related statistics."""
-    total = db.query(Word).count()
-    learned = db.query(Word).filter(Word.learned == True).count()
-    by_difficulty = db.query(
+    word_query = db.query(Word)
+    if user_id is not None:
+        word_query = word_query.filter(Word.user_id == user_id)
+
+    total = word_query.count()
+    learned = word_query.filter(Word.learned == True).count()
+    by_difficulty = word_query.with_entities(
         Word.difficulty,
         sql_func.count(Word.id)
     ).group_by(Word.difficulty).all()
@@ -44,31 +48,33 @@ async def get_word_stats(db: Session = Depends(get_db)):
 async def get_review_stats(user_id: Optional[int] = None, db: Session = Depends(get_db)):
     """Get review activity statistics."""
     # Total reviews
-    total_reviews = db.query(LearningRecord).filter(
-        LearningRecord.action == "reviewed"
-    ).count()
+    record_query = db.query(LearningRecord).filter(LearningRecord.action == "reviewed")
+    review_query = db.query(Review)
+    if user_id is not None:
+        record_query = record_query.filter(LearningRecord.user_id == user_id)
+        review_query = review_query.filter(Review.user_id == user_id)
+
+    total_reviews = record_query.count()
 
     # Reviews this week
     week_ago = datetime.now() - timedelta(days=7)
-    weekly_reviews = db.query(LearningRecord).filter(
-        LearningRecord.action == "reviewed",
+    weekly_reviews = record_query.filter(
         LearningRecord.created_at >= week_ago
     ).count()
 
     # Reviews today
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    daily_reviews = db.query(LearningRecord).filter(
-        LearningRecord.action == "reviewed",
+    daily_reviews = record_query.filter(
         LearningRecord.created_at >= today
     ).count()
 
     # Average quality
-    avg_quality = db.query(LearningRecord).filter(
-        LearningRecord.action == "reviewed"
-    ).with_entities(sql_func.avg(LearningRecord.score)).scalar()
+    avg_quality = record_query.with_entities(sql_func.avg(LearningRecord.score)).scalar()
 
     # Due words count
-    due_count = db.query(Review).filter(Review.is_due == True).count()
+    due_count = review_query.filter(
+        (Review.next_review_date == None) | (Review.next_review_date <= datetime.now())
+    ).count()
 
     return {
         "total_reviews": total_reviews,
@@ -86,7 +92,10 @@ async def get_daily_stats(days: int = 30, user_id: Optional[int] = None, db: Ses
 
     stats = db.query(DailyStats).filter(
         DailyStats.date >= start_date
-    ).order_by(DailyStats.date).all()
+    )
+    if user_id is not None:
+        stats = stats.filter(DailyStats.user_id == user_id)
+    stats = stats.order_by(DailyStats.date).all()
 
     return {
         "period_days": days,
